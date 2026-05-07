@@ -1,0 +1,15 @@
+[package]
+name        = "axon_parser"
+version     = "0.1.0"
+edition     = "2021"
+description = "AXON language parser — produces a typed AST from a token stream"
+authors     = ["Edison Lepiten <aieonyx>"]
+license     = "SEE LICENSE FILE"
+
+[dependencies]
+axon_lexer = { path = "../axon_lexer" }
+
+[dev-dependencies]
+
+[features]
+default = []

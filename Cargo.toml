@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "axon_lexer",
+    "axon_parser",
+    "axon_cli",
+]
+
+# Workspace-wide dependency versions
+[workspace.dependencies]
+axon_lexer  = { path = "axon_lexer"  }
+axon_parser = { path = "axon_parser" }
+
+[workspace.metadata]
+description = "AXON — AI-Native Programming Language"
+authors     = ["Edison Lepiten <aieonyx>"]
+license     = "SEE LICENSE FILE"
+repository  = "https://github.com/aieonyx/axon"

@@ -1,0 +1,14 @@
+[package]
+name        = "axon_lexer"
+version     = "0.1.0"
+edition     = "2021"
+description = "AXON language lexer — tokenizes AXON source into a token stream"
+authors     = ["Edison Lepiten <aieonyx>"]
+license     = "SEE LICENSE FILE"
+
+[dependencies]
+
+[dev-dependencies]
+
+[features]
+default = []

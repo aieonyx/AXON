@@ -1,0 +1,18 @@
+[package]
+name        = "axon_cli"
+version     = "0.1.0"
+edition     = "2021"
+description = "AXON compiler CLI — axon build, check, fmt, audit"
+authors     = ["Edison Lepiten <aieonyx>"]
+license     = "SEE LICENSE FILE"
+
+[[bin]]
+name = "axon"
+path = "src/main.rs"
+
+[dependencies]
+axon_lexer  = { path = "../axon_lexer"  }
+axon_parser = { path = "../axon_parser" }
+
+[features]
+default = []
