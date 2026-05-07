@@ -245,7 +245,7 @@ pub fn tokenize(mut self) -> Vec<Token> {
                 self.line += 1;
                 self.col = 1;
             }
-
+       
             other => { content.push(other); }
         }
     }
@@ -296,6 +296,235 @@ pub fn tokenize(mut self) -> Vec<Token> {
         ));
     }
 }
+    // Operators and punctuation
+'|' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '>')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::PipeForward, "|>", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Pipe, "|", span));
+    }
+}
+'~' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '>')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::TildeArrow, "~>", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Tilde, "~", span));
+    }
+}
+'-' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '>')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Arrow, "->", span));
+    } else if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::MinusAssign, "-=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Minus, "-", span));
+    }
+}
+'=' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '>')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::FatArrow, "=>", span));
+    } else if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::EqEq, "==", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Assign, "=", span));
+    }
+}
+'!' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::BangEq, "!=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Bang, "!", span));
+    }
+}
+'<' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::LtEq, "<=", span));
+    } else if let Some(&(_, '<')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::ShiftLeft, "<<", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Lt, "<", span));
+    }
+}
+'>' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::GtEq, ">=", span));
+    } else if let Some(&(_, '>')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::ShiftRight, ">>", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Gt, ">", span));
+    }
+}
+':' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, ':')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        if let Some(&(_, '<')) = self.chars.peek() {
+            self.chars.next();
+            self.col += 1;
+            let span = Span::new(self.file_id, pos, pos+3, self.line, start_col);
+            tokens.push(Token::new(TokenKind::TurboStart, "::<", span));
+        } else {
+            let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+            tokens.push(Token::new(TokenKind::DoubleColon, "::", span));
+        }
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Colon, ":", span));
+    }
+}
+'.' => {
+    let start_col = self.col;
+    self.col += 1;
+    if let Some(&(_, '.')) = self.chars.peek() {
+        self.chars.next();
+        self.col += 1;
+        if let Some(&(_, '=')) = self.chars.peek() {
+            self.chars.next();
+            self.col += 1;
+            let span = Span::new(self.file_id, pos, pos+3, self.line, start_col);
+            tokens.push(Token::new(TokenKind::DotDotEq, "..=", span));
+        } else {
+            let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+            tokens.push(Token::new(TokenKind::DotDot, "..", span));
+        }
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Dot, ".", span));
+    }
+}
+'+' => {
+    let start_col = self.col; self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next(); self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::PlusAssign, "+=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Plus, "+", span));
+    }
+}
+'*' => {
+    let start_col = self.col; self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next(); self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::StarAssign, "*=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Star, "*", span));
+    }
+}
+'/' => {
+    let start_col = self.col; self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next(); self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::SlashAssign, "/=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Slash, "/", span));
+    }
+}
+'%' => {
+    let start_col = self.col; self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next(); self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::PercentAssign, "%=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Percent, "%", span));
+    }
+}
+'&' => {
+    let start_col = self.col; self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next(); self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::AmpAssign, "&=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Ampersand, "&", span));
+    }
+}
+'^' => {
+    let start_col = self.col; self.col += 1;
+    if let Some(&(_, '=')) = self.chars.peek() {
+        self.chars.next(); self.col += 1;
+        let span = Span::new(self.file_id, pos, pos+2, self.line, start_col);
+        tokens.push(Token::new(TokenKind::CaretAssign, "^=", span));
+    } else {
+        let span = Span::new(self.file_id, pos, pos+1, self.line, start_col);
+        tokens.push(Token::new(TokenKind::Caret, "^", span));
+    }
+}
+'(' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::LParen,"(",s)); }
+')' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::RParen,")",s)); }
+'[' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::LBracket,"[",s)); }
+']' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::RBracket,"]",s)); }
+'{' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::LBrace,"{",s)); }
+'}' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::RBrace,"}",s)); }
+',' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Comma,",",s)); }
+';' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Semicolon,";",s)); }
+'#' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Hash,"#",s)); }
+'?' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Question,"?",s)); }
+
 
             other => {
                 let span = Span::new(self.file_id, pos, pos + 1, self.line, self.col);
