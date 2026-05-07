@@ -68,7 +68,6 @@ pub fn tokenize(mut self) -> Vec<Token> {
 
             // Identifiers and keywords
             'a'..='z' | 'A'..='Z' | '_' => {
-                // collect the full identifier
                 let start     = pos;
                 let start_col = self.col;
                 let mut word  = String::from(ch);
@@ -79,20 +78,30 @@ pub fn tokenize(mut self) -> Vec<Token> {
                         let (_, nc) = self.chars.next().unwrap();
                         word.push(nc);
                         self.col += 1;
+                    } else if nc == '@' && word == "let" {
+                            // let@ — consume the @ and emit LetAt
+                            self.chars.next();
+                            self.col += 1;
+                            word.push('@');
+                            break;
                     } else {
                         break;
-                    }
-                }
-
-                let span = Span::new(self.file_id, start, start + word.len(), self.line, start_col);
-
-                // check if it is a keyword
-                let kind = match keyword_from_str(&word) {
-                    Some(kw) => kw,
-                    None     => TokenKind::Ident(word.clone()),
-                };
-                tokens.push(Token::new(kind, word, span));
             }
+    }
+
+    let span = Span::new(self.file_id, start, start + word.len(), self.line, start_col);
+
+    // check if it is a keyword — let@ maps to LetAt
+    let kind = if word == "let@" {
+        TokenKind::LetAt
+    } else {
+        match keyword_from_str(&word) {
+            Some(kw) => kw,
+            None     => TokenKind::Ident(word.clone()),
+        }
+    };
+    tokens.push(Token::new(kind, word, span));
+}
 
             // Everything else — Error token for now
             // More cases will be added in P2-03 step by step
@@ -522,10 +531,65 @@ pub fn tokenize(mut self) -> Vec<Token> {
 '}' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::RBrace,"}",s)); }
 ',' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Comma,",",s)); }
 ';' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Semicolon,";",s)); }
-'#' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Hash,"#",s)); }
 '?' => { let s = Span::new(self.file_id,pos,pos+1,self.line,self.col); self.col+=1; tokens.push(Token::new(TokenKind::Question,"?",s)); }
 
-
+    '@' => {
+    let start_col = self.col;
+    self.col += 1;
+    // collect the identifier after @
+    let mut name = String::new();
+    while let Some(&(_, nc)) = self.chars.peek() {
+        if nc.is_alphanumeric() || nc == '_' {
+            let (_, nc) = self.chars.next().unwrap();
+            name.push(nc);
+            self.col += 1;
+        } else {
+            break;
+        }
+    }
+    let full  = format!("@{}", name);
+    let span  = Span::new(
+        self.file_id, pos,
+        pos + full.len(),
+        self.line, start_col
+    );
+    // check for temporal / program_intent tokens
+    match temporal_from_str(&name) {
+        Some(kind) => tokens.push(Token::new(kind, full, span)),
+        None => {
+            // regular decorator — emit At + Ident separately
+            let at_span = Span::new(
+                self.file_id, pos, pos+1,
+                self.line, start_col
+            );
+            tokens.push(Token::new(TokenKind::At, "@", at_span));
+            if !name.is_empty() {
+                let id_span = Span::new(
+                    self.file_id, pos+1,
+                    pos+1+name.len(),
+                    self.line, start_col+1
+                );
+                tokens.push(Token::new(
+                    TokenKind::Ident(name.clone()),
+                    name,
+                    id_span
+                ));
+            }
+        }
+    }
+}
+            '#' => {
+    // Line comment — skip everything to end of line
+    self.col += 1;
+    while let Some(&(_, nc)) = self.chars.peek() {
+        if nc == '\n' { break; }
+        self.chars.next();
+        self.col += 1;
+    }
+    // do not emit a token — comments are invisible to parser
+}
+            
+            
             other => {
                 let span = Span::new(self.file_id, pos, pos + 1, self.line, self.col);
                 tokens.push(Token::new(
