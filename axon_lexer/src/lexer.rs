@@ -96,6 +96,33 @@ pub fn tokenize(mut self) -> Vec<Token> {
 
             // Everything else — Error token for now
             // More cases will be added in P2-03 step by step
+            // Integer literals
+'0'..='9' => {
+    let start     = pos;
+    let start_col = self.col;
+    let mut num   = String::from(ch);
+    self.col += 1;
+
+    while let Some(&(_, nc)) = self.chars.peek() {
+        if nc.is_ascii_digit() {
+            let (_, nc) = self.chars.next().unwrap();
+            num.push(nc);
+            self.col += 1;
+        } else {
+            break;
+        }
+    }
+
+    let span = Span::new(
+        self.file_id, start,
+        start + num.len(),
+        self.line, start_col
+    );
+    let value: i64 = num.parse().unwrap_or(0);
+    tokens.push(Token::new(TokenKind::IntLit(value), num, span));
+}
+
+
             other => {
                 let span = Span::new(self.file_id, pos, pos + 1, self.line, self.col);
                 tokens.push(Token::new(
