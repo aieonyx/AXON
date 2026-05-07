@@ -80,7 +80,7 @@ impl ParseError {
     ///      |
     ///   NN | source line
     ///      | ^ hint
-    pub fn display(&self, source: &str) -> String {
+    pub fn display(&self, _source: &str) -> String {
         match self {
             ParseError::UnexpectedToken { expected, found, span, hint } => {
                 let mut msg = format!(

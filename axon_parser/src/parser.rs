@@ -211,33 +211,208 @@ impl<'src> Parser<'src> {
             (a, b) => discriminant(a) == discriminant(b),
         }
     }
+     // ── P2-07: Module and Import parsing ──────────────────────────
+
+/// Parse @program_intent declaration if present.
+/// Syntax: @program_intent NEWLINE """ ... """
+fn parse_program_intent(&mut self) -> Option<crate::ast::ProgramIntent> {
+    use crate::ast::ProgramIntent;
+
+    if !matches!(self.peek_kind(), TokenKind::ProgramIntentDecl) {
+        return None;
+    }
+
+    let span = self.current_span();
+    self.advance(); // consume @program_intent
+
+    self.skip_newlines();
+
+    // Expect the triple-quoted string
+    let description = match self.peek_kind().clone() {
+        TokenKind::StrLit(s) => {
+            self.advance();
+            s
+        }
+        _ => {
+            self.error(
+                self.current_span(),
+                "@program_intent must be followed by a triple-quoted string",
+            );
+            return None;
+        }
+    };
+
+    self.skip_newlines();
+
+    Some(ProgramIntent {
+        span,
+        description,
+        constraints : vec![],  // AI pass extracts these at Stage 5
+    })
+}
+
+/// Parse module declaration if present.
+/// Syntax: module path.to.name NEWLINE
+fn parse_module_decl(&mut self) -> Option<crate::ast::ModuleDecl> {
+    use crate::ast::ModuleDecl;
+
+    if !self.at(&TokenKind::Module) {
+        return None;
+    }
+
+    let span = self.current_span();
+    self.advance(); // consume 'module'
+
+    let path = self.parse_dotted_ident_path();
+    if path.is_empty() {
+        self.error(
+            self.current_span(),
+            "expected module path after 'module'",
+        );
+        return None;
+    }
+
+    self.eat(&TokenKind::Newline);
+
+    Some(ModuleDecl { span, path })
+}
+
+/// Parse import declaration.
+/// Syntax: import path.to.module [as alias] NEWLINE
+fn parse_import_decl(&mut self) -> Option<crate::ast::ImportDecl> {
+    use crate::ast::ImportDecl;
+
+    let span = self.current_span();
+    self.expect(&TokenKind::Import)?; // consume 'import'
+
+    let path = self.parse_dotted_ident_path();
+    if path.is_empty() {
+        self.error(
+            self.current_span(),
+            "expected module path after 'import'",
+        );
+        return None;
+    }
+
+    // Optional 'as alias'
+    let alias = if self.at(&TokenKind::As) {
+        self.advance(); // consume 'as'
+        match self.peek_kind().clone() {
+            TokenKind::Ident(name) => {
+                let s = self.current_span();
+                self.advance();
+                Some(crate::ast::Ident::new(name, s))
+            }
+            _ => {
+                self.error(
+                    self.current_span(),
+                    "expected identifier after 'as'",
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    self.eat(&TokenKind::Newline);
+
+    Some(ImportDecl { span, path, alias })
+}
+
+/// Parse a dotted identifier path: foo.bar.baz
+/// Returns a Vec of Idents.
+fn parse_dotted_ident_path(&mut self) -> Vec<crate::ast::Ident> {
+    let mut parts = Vec::new();
+
+    // First segment
+    match self.peek_kind().clone() {
+        TokenKind::Ident(name) => {
+            let s = self.current_span();
+            self.advance();
+            parts.push(crate::ast::Ident::new(name, s));
+        }
+        _ => return parts,
+    }
+
+    // Subsequent .segment parts
+    while self.at(&TokenKind::Dot) {
+        self.advance(); // consume '.'
+        match self.peek_kind().clone() {
+            TokenKind::Ident(name) => {
+                let s = self.current_span();
+                self.advance();
+                parts.push(crate::ast::Ident::new(name, s));
+            }
+            _ => {
+                self.error(
+                    self.current_span(),
+                    "expected identifier after '.' in module path",
+                );
+                break;
+            }
+        }
+    }
+
+    parts
+}
+
 
     // ── Parse entry point ──────────────────────────────────────
 
     /// Parse the entire program.
     /// P2-07 will implement this fully.
     /// For now — returns an empty Program.
-    pub fn parse_program(&mut self) -> Program {
-        use crate::ast::{Program};
-        
+pub fn parse_program(&mut self) -> Program {
+    let start = self.current_span();
 
-        let start = self.current_span();
+    self.skip_newlines();
 
-        // P2-07: implement full program parsing
-        // Skip all tokens for now
-        while !self.at_eof() {
-            self.advance();
+    // Parse optional @program_intent
+    let program_intent = self.parse_program_intent();
+
+    self.skip_newlines();
+
+    // Parse optional module declaration
+    let module = self.parse_module_decl();
+
+    self.skip_newlines();
+
+    // Parse imports
+    let mut imports = Vec::new();
+    while self.at(&TokenKind::Import) {
+        if let Some(imp) = self.parse_import_decl() {
+            imports.push(imp);
         }
+        self.skip_newlines();
+    }
 
-        Program {
-            span           : start,
-            program_intent : None,
-            module         : None,
-            imports        : vec![],
-            items          : vec![],
-        }
+    // P2-08: parse top-level items
+    // For now skip everything remaining
+    while !self.at_eof() {
+        self.advance();
+    }
+
+    let end = self.current_span();
+    Program {
+        span : Self::merge_spans(start, end),
+        program_intent,
+        module,
+        imports,
+        items          : vec![],
     }
 }
+    /// Merge two spans into one covering both.
+fn merge_spans(a: Span, b: Span) -> Span {
+    Span::new(
+        a.file,           // ← fixed
+        a.start.min(b.start),
+        a.end.max(b.end),
+        a.line.min(b.line),
+        a.col.min(b.col),
+    )
+}
+} // closes impl<'src> Parser<'src>
 
 // ── Tests ─────────────────────────────────────────────────────
 
@@ -459,4 +634,53 @@ mod tests {
         assert_eq!(p.errors.len(), 20,
             "errors should be capped at 20");
     }
+
+     #[test]
+    fn test_parse_module_decl() {
+        let result = crate::parse("module hello\n", file());
+         assert!(result.is_ok(), "errors: {:?}", result.errors);
+         assert!(result.program.module.is_some());
+        let m = result.program.module.unwrap();
+        assert_eq!(m.path.len(), 1);
+        assert_eq!(m.path[0].name, "hello");
+    }
+
+    #[test]
+    fn test_parse_module_path_dotted() {
+        let result = crate::parse("module aieonyx.aegis.monitor\n", file());
+        assert!(result.is_ok(), "errors: {:?}", result.errors);
+        let m = result.program.module.unwrap();
+        assert_eq!(m.path.len(), 3);
+        assert_eq!(m.path[0].name, "aieonyx");
+        assert_eq!(m.path[1].name, "aegis");
+        assert_eq!(m.path[2].name, "monitor");
+    }
+
+    #[test]
+    fn test_parse_import_simple() {
+        let src = "module hello\nimport axon.sys\n";
+        let result = crate::parse(src, file());
+        assert!(result.is_ok(), "errors: {:?}", result.errors);
+        assert_eq!(result.program.imports.len(), 1);
+        assert_eq!(result.program.imports[0].path[0].name, "axon");
+        assert_eq!(result.program.imports[0].path[1].name, "sys");
+    }
+
+    #[test]
+    fn test_parse_import_with_alias() {
+        let src = "module hello\nimport axon.sys.sel4.ipc as ipc\n";
+        let result = crate::parse(src, file());
+        assert!(result.is_ok(), "errors: {:?}", result.errors);
+        let imp = &result.program.imports[0];
+        assert!(imp.alias.is_some());
+        assert_eq!(imp.alias.as_ref().unwrap().name, "ipc");
+    }
+
+    #[test]
+        fn test_parse_multiple_imports() {
+        let src = "module hello\nimport axon.sys\nimport axon.web\n";
+        let result = crate::parse(src, file());
+        assert!(result.is_ok(), "errors: {:?}", result.errors);
+        assert_eq!(result.program.imports.len(), 2);
+}
 }
