@@ -1,0 +1,33 @@
+AXON Programming Language
+Copyright (c) 2026 Edison Lepiten — Founder & Project Director, AIEONYX
+All rights reserved.
+
+Project:    AXON — AI-Native Programming Language
+Repository: github.com/aieonyx/axon
+Contact:    github.com/aieonyx
+
+ORIGIN DECLARATION
+------------------
+AXON was conceived, designed, and authored by Edison Lepiten (AIEONYX) in April 2026.
+The AXON Language Specification v0.1, including its syntax design, memory
+model (AI-Inferred Ownership / Manual Hint / Raw Zone), type system, AI-native
+compiler features (@ai.assist, @ai.verify, @ai.optimize), and audit trail
+architecture, constitutes original intellectual work protected under
+international copyright law.
+
+The concept of AI-native compilation as a first-class language feature —
+specifically, deterministic AI-assisted ownership inference baked into the
+compiler rather than applied as a tool alongside the language — is original
+to this project as of the date of first publication.
+
+Date of First Publication: April 30, 2026
+
+NOTICE
+------
+This work may not be reproduced, distributed, modified, or used as the basis
+for derivative works without explicit written permission from the copyright
+holder, except as permitted under the LICENSE terms accompanying this file.
+
+Unauthorized use of AXON's core design concepts, architecture, or
+specification in competing language projects constitutes infringement of
+this copyright.

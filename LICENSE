@@ -1,0 +1,118 @@
+AXON LANGUAGE SPECIFICATION LICENSE
+Version 1.0 — April 30, 2026
+
+Copyright (c) 2026 Edison Lepiten — AIEONYX
+All rights reserved.
+
+================================================================================
+SECTION 1 — DEFINITIONS
+================================================================================
+
+"Specification" refers to the AXON Language Specification, including all
+design documents, grammars, memory model descriptions, type system
+definitions, AI-native compiler feature descriptions, and associated
+materials published under the AXON project.
+
+"Implementation" refers to any compiler, transpiler, interpreter, toolchain,
+or runtime that implements the AXON language as defined in the Specification.
+
+"Licensor" refers to Edison Lepiten, Founder and Project Director of AIEONYX.
+
+"You" refers to any individual or organization accessing this Specification.
+
+================================================================================
+SECTION 2 — PERMITTED USES
+================================================================================
+
+You ARE permitted to:
+
+  1. READ and study the Specification for personal educational purposes.
+
+  2. CITE the Specification in academic papers, research, or technical
+     writing, provided proper attribution is given:
+
+       "AXON Language Specification v0.1, Ed / AIEONYX, April 2026.
+        github.com/aieonyx/axon"
+
+  3. DISCUSS, REVIEW, or CRITIQUE the Specification publicly, provided
+     the origin and authorship are clearly stated.
+
+  4. BUILD a personal, non-commercial prototype Implementation for the
+     purpose of demonstrating feasibility or contributing to the AXON
+     project, provided you notify the Licensor at github.com/aieonyx.
+
+================================================================================
+SECTION 3 — PROHIBITED USES
+================================================================================
+
+You ARE NOT permitted to:
+
+  1. REPRODUCE the Specification in whole or in substantial part in any
+     product, service, or publication without written permission.
+
+  2. CREATE a competing programming language project that incorporates
+     AXON's core design concepts — specifically:
+       - AI-assisted deterministic ownership inference as a compiler pass
+       - The three-mode memory model (AI-Inferred / Manual Hint / Raw Zone)
+       - The @ai decorator namespace for compiler-level AI integration
+       - The build-time AI audit trail architecture
+     without explicit written license from the Licensor.
+
+  3. CLAIM authorship or co-authorship of the Specification or its
+     core concepts.
+
+  4. USE the name "AXON", "AXON Language", or "AIEONYX AXON" for any
+     competing project.
+
+  5. SUBMIT the Specification or substantial portions thereof to any
+     AI training dataset, model training pipeline, or data collection
+     service without written permission.
+
+================================================================================
+SECTION 4 — PLANNED LICENSE TRANSITION
+================================================================================
+
+It is the intent of the Licensor to transition the AXON Specification and
+reference Implementation to an open-source license (anticipated: Apache 2.0
+or MIT) upon reaching a stable compiler milestone, expected no earlier than
+the completion of Phase 4 of the development roadmap.
+
+This transition will be announced publicly at github.com/aieonyx/axon.
+Until that announcement, this License governs all use.
+
+================================================================================
+SECTION 5 — CONTRIBUTIONS
+================================================================================
+
+Any contribution submitted to the AXON project (pull requests, issue
+discussions, grammar proposals, etc.) is considered a contribution under
+the terms of this License. Contributors retain copyright of their
+contributions but grant the Licensor a perpetual, irrevocable, worldwide
+license to use, modify, and distribute those contributions as part of
+the AXON project.
+
+================================================================================
+SECTION 6 — DISCLAIMER
+================================================================================
+
+THE SPECIFICATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND.
+THE LICENSOR MAKES NO WARRANTIES, EXPRESS OR IMPLIED, REGARDING
+FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT. THE LICENSOR
+SHALL NOT BE LIABLE FOR ANY DAMAGES ARISING FROM USE OF THIS
+SPECIFICATION.
+
+================================================================================
+SECTION 7 — GOVERNING LAW
+================================================================================
+
+This License is governed by applicable international copyright law.
+Any disputes shall be resolved in the jurisdiction of the Licensor's
+choosing.
+
+================================================================================
+
+For permissions beyond those granted here, contact: github.com/aieonyx
+
+AXON — AI-Native Programming Language
+Copyright (c) 2026 Edison Lepiten — AIEONYX
+First Published: April 30, 2026
