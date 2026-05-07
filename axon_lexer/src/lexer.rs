@@ -47,17 +47,72 @@ impl<'src> Lexer<'src> {
     /// Tokenize the entire source into a Vec<Token>.
     /// Always ends with TokenKind::Eof.
     /// Never panics — invalid input produces Error tokens.
-    pub fn tokenize(mut self) -> Vec<Token> {
-        // P2-03: implement full tokenization
-        // For now: return minimal token stream so tests pass
-        let span = Span::new(self.file_id, 0, 0, 1, 1);
-        vec![Token::new(TokenKind::Eof, "", span)]
+pub fn tokenize(mut self) -> Vec<Token> {
+    let mut tokens = Vec::new();
+
+    while let Some((pos, ch)) = self.chars.next() {
+        self.pos = pos;
+        match ch {
+            // Skip spaces and tabs
+            ' ' | '\t' | '\r' => {
+                self.col += 1;
+            }
+
+            // Newline
+            '\n' => {
+                let span = Span::new(self.file_id, pos, pos + 1, self.line, self.col);
+                tokens.push(Token::new(TokenKind::Newline, "\n", span));
+                self.line += 1;
+                self.col = 1;
+            }
+
+            // Identifiers and keywords
+            'a'..='z' | 'A'..='Z' | '_' => {
+                // collect the full identifier
+                let start     = pos;
+                let start_col = self.col;
+                let mut word  = String::from(ch);
+                self.col += 1;
+
+                while let Some(&(_, nc)) = self.chars.peek() {
+                    if nc.is_alphanumeric() || nc == '_' {
+                        let (_, nc) = self.chars.next().unwrap();
+                        word.push(nc);
+                        self.col += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                let span = Span::new(self.file_id, start, start + word.len(), self.line, start_col);
+
+                // check if it is a keyword
+                let kind = match keyword_from_str(&word) {
+                    Some(kw) => kw,
+                    None     => TokenKind::Ident(word.clone()),
+                };
+                tokens.push(Token::new(kind, word, span));
+            }
+
+            // Everything else — Error token for now
+            // More cases will be added in P2-03 step by step
+            other => {
+                let span = Span::new(self.file_id, pos, pos + 1, self.line, self.col);
+                tokens.push(Token::new(
+                    TokenKind::Error(format!("unexpected character: {:?}", other)),
+                    &other.to_string(),
+                    span,
+                ));
+                self.col += 1;
+            }
+        }
     }
 
-    // ── P2-03 implementation stubs ────────────────────────────
-    // These will be fully implemented in P2-03.
-    // Using todo!() so compiler knows they are intentionally empty.
-
+    // Always end with Eof
+    let eof_span = Span::new(self.file_id, self.pos, self.pos, self.line, self.col);
+    tokens.push(Token::new(TokenKind::Eof, "", eof_span));
+    tokens
+}
     fn next_token(&mut self) -> Option<Token> {
         todo!("P2-03: implement token dispatch")
     }
