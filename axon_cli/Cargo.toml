@@ -11,8 +11,9 @@ name = "axon"
 path = "src/main.rs"
 
 [dependencies]
-axon_lexer  = { path = "../axon_lexer"  }
-axon_parser = { path = "../axon_parser" }
+axon_lexer   = { path = "../axon_lexer"   }
+axon_parser  = { path = "../axon_parser"  }
+axon_codegen = { path = "../axon_codegen" }
 
 [features]
 default = []

@@ -1,128 +1,124 @@
 // ============================================================
-// AXON Compiler CLI — axon_cli/src/main.rs
+// AXON CLI — main.rs
+// Commands: axon version | axon check | axon build
 // Copyright © 2026 Edison Lepiten — AIEONYX
 // github.com/aieonyx/axon
-//
-// Entry point for the 'axon' command.
-// Phase 2: check command wired to parser.
 // ============================================================
 
 use std::env;
 use std::fs;
-use std::process;
-
-const VERSION : &str = "0.1.0";
-const BANNER  : &str = r#"
-   ___  _  ______  _   _
-  / _ \| | \ \ \ \| \ | |
- / /_\ \ |  \ \ \ \  \| |
- |  _  | |  / / / / |\  |
- | | | | |_/ / / /| | \ |
- \_| |_/___/_/_/_/ |_|  \_|
-
- AI-Native Programming Language
- Copyright (c) 2026 Edison Lepiten — AIEONYX
- github.com/aieonyx/axon
-"#;
+use std::path::Path;
+use axon_lexer::FileId;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        print_help();
-        process::exit(0);
+        print_usage();
+        std::process::exit(1);
     }
 
     match args[1].as_str() {
-        "version" | "--version" | "-v" => {
-            cmd_version();
-        },
-        "check" => {
-            if args.len() < 3 {
-                eprintln!("error: 'axon check' requires a file path");
-                eprintln!("usage: axon check <file.axon>");
-                process::exit(1);
-            }
-            cmd_check(&args[2]);
-        },
-        "build" => {
-            eprintln!("axon build: not yet implemented (Phase 4)");
-            eprintln!("use 'axon check' to validate syntax");
-            process::exit(1);
-        },
-        "help" | "--help" | "-h" => {
-            print_help();
-        },
-        unknown => {
-            eprintln!("error: unknown command '{}'", unknown);
-            eprintln!("run 'axon help' for usage");
-            process::exit(1);
+        "version" => cmd_version(),
+        "check"   => cmd_check(&args),
+        "build"   => cmd_build(&args),
+        other     => {
+            eprintln!("axon: unknown command '{}'", other);
+            print_usage();
+            std::process::exit(1);
         }
     }
+}
+
+fn print_usage() {
+    println!("AXON — AI-Native Sovereign Systems Programming Language");
+    println!("Copyright © 2026 Edison Lepiten — AIEONYX");
+    println!();
+    println!("Usage: axon <command> [file]");
+    println!();
+    println!("Commands:");
+    println!("  version         Print AXON version");
+    println!("  check  <file>   Parse and verify an AXON source file");
+    println!("  build  <file>   Transpile AXON source to Rust");
 }
 
 fn cmd_version() {
-    println!("{}", BANNER);
-    println!("axon compiler  v{}", VERSION);
-    println!("phase          2 — parser (in progress)");
-    println!("built by       Edison Lepiten — AIEONYX");
-    println!("repository     github.com/aieonyx/axon");
+    println!("AXON 0.3.1-phase3");
+    println!("Lexer:     complete (v0.3.1)");
+    println!("Parser:    complete (P2-19 passed)");
+    println!("Codegen:   phase 3 (Rust transpiler)");
+    println!("Backend:   planned (LLVM, Phase 4)");
+    println!("AI engine: planned (Phase 5)");
 }
 
-fn cmd_check(path: &str) {
-    // Read source file
+fn cmd_check(args: &[String]) {
+    if args.len() < 3 {
+        eprintln!("Usage: axon check <file.axon>");
+        std::process::exit(1);
+    }
+    let path = &args[2];
     let source = match fs::read_to_string(path) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(e) => {
-            eprintln!("error: could not read '{}': {}", path, e);
-            process::exit(1);
+            eprintln!("axon: cannot read '{}': {}", path, e);
+            std::process::exit(1);
         }
     };
 
-    println!("axon check: {}", path);
-
-    // Lex
-    let file_id = axon_lexer::FileId(0);
-    let tokens  = axon_lexer::lex(&source, file_id);
-
-    println!("  lexer  : {} tokens", tokens.len());
-
-    // Parse
-    let result = axon_parser::parse(&source, file_id);
-
-    if result.is_ok() {
-        println!("  parser : ok");
-        println!("  result : no errors");
-        process::exit(0);
-    } else {
-        println!("  parser : {} error(s)", result.errors.len());
-        for err in &result.errors {
-            eprintln!("{}", err.display(&source));
+    let result = axon_parser::parse(&source, FileId(1));
+    if result.errors.is_empty() {
+        println!("axon check: {} — OK", path);
+        if let Some(m) = &result.program.module {
+            let p = m.path.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join(".");
+            println!("  module:  {}", p);
         }
-        process::exit(1);
+        println!("  imports: {}", result.program.imports.len());
+        println!("  items:   {}", result.program.items.len());
+    } else {
+        eprintln!("axon check: {} — {} error(s)", path, result.errors.len());
+        for err in &result.errors {
+            eprintln!("  {:?}", err);
+        }
+        std::process::exit(1);
     }
 }
 
-fn print_help() {
-    println!("{}", BANNER);
-    println!("USAGE:");
-    println!("    axon <command> [arguments]");
-    println!();
-    println!("COMMANDS:");
-    println!("    check  <file.axon>    Check syntax and report errors");
-    println!("    build  <file.axon>    Compile to binary (Phase 4 — not yet available)");
-    println!("    version               Print compiler version");
-    println!("    help                  Print this help message");
-    println!();
-    println!("EXAMPLES:");
-    println!("    axon check src/main.axon");
-    println!("    axon version");
-    println!();
-    println!("PHASE STATUS:");
-    println!("    Phase 2 — Parser (current)");
-    println!("    Phase 3 — Transpiler (planned)");
-    println!("    Phase 4 — Native compiler via LLVM (planned)");
-    println!();
-    println!("Copyright (c) 2026 Edison Lepiten — AIEONYX");
-    println!("github.com/aieonyx/axon");
+fn cmd_build(args: &[String]) {
+    if args.len() < 3 {
+        eprintln!("Usage: axon build <file.axon>");
+        std::process::exit(1);
+    }
+    let path = &args[2];
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("axon: cannot read '{}': {}", path, e);
+            std::process::exit(1);
+        }
+    };
+
+    match axon_codegen::codegen(&source) {
+        Ok(rust_source) => {
+            // Write to <file>.rs
+            let out_path = Path::new(path)
+                .with_extension("rs")
+                .to_string_lossy()
+                .to_string();
+            match fs::write(&out_path, &rust_source) {
+                Ok(_) => {
+                    println!("axon build: {} → {}", path, out_path);
+                    println!("  Rust source written. Run: rustc {}", out_path);
+                }
+                Err(e) => {
+                    eprintln!("axon: cannot write '{}': {}", out_path, e);
+                    // Print to stdout as fallback
+                    print!("{}", rust_source);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("axon build failed:\n{}", e);
+            std::process::exit(1);
+        }
+    }
 }
