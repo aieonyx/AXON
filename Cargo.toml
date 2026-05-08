@@ -6,6 +6,7 @@ members = [
     "axon_codegen",
     "axon_rt",
     "axon_std",
+    "axon_llvm",
     "axon_cli",
 ]
 
@@ -16,6 +17,7 @@ axon_parser  = { path = "axon_parser"  }
 axon_codegen = { path = "axon_codegen" }
 axon_rt      = { path = "axon_rt"      }
 axon_std     = { path = "axon_std"     }
+axon_llvm    = { path = "axon_llvm"    }
 
 [workspace.metadata]
 description = "AXON — AI-Native Programming Language"
