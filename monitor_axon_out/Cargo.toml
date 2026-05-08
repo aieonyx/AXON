@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name    = "monitor_axon_out"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "monitor"
+path = "src/main.rs"
+
+[lib]
+name = "monitor_axon_out"
+path = "src/lib.rs"
+
+[dependencies]
+axon_rt  = { path = "/home/edisonbl/axon/axon_rt"  }
+axon_std = { path = "/home/edisonbl/axon/axon_std" }
+
+[profile.release]
+opt-level = 3

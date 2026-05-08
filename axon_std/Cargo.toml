@@ -1,0 +1,9 @@
+[package]
+name        = "axon_std"
+version     = "0.1.0"
+edition     = "2021"
+description = "AXON standard library — sovereign systems primitives"
+authors     = ["Edison Lepiten <aieonyx>"]
+
+[dependencies]
+axon_rt = { path = "../axon_rt" }

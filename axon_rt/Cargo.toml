@@ -1,0 +1,6 @@
+[package]
+name        = "axon_rt"
+version     = "0.1.0"
+edition     = "2021"
+description = "AXON runtime — defer guards, capability stubs, sovereign primitives"
+authors     = ["Edison Lepiten <aieonyx>"]
