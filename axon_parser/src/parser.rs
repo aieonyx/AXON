@@ -2338,4 +2338,153 @@ mod tests {
             other => panic!("{:?}", other),
         }
     }
+
+    // ══════════════════════════════════════════════════════════
+    // P2-19: INTEGRATION TEST — AEGIS MONITOR
+    // The finish line for Phase 2.
+    // When this passes — AXON stops being documents
+    // and becomes a language.
+    // ══════════════════════════════════════════════════════════
+
+    const AEGIS_MONITOR: &str = concat!(
+        "module aieonyx.aegis.monitor\n",
+        "\n",
+        "import axon.sys.sel4.ipc as ipc\n",
+        "import axon.mesh.collective as collective\n",
+        "\n",
+        "enum ThreatLevel:\n",
+        "    Clear\n",
+        "    Advisory(detail: Str)\n",
+        "    Critical(layer: Int, detail: Str)\n",
+        "\n",
+        "struct Signal:\n",
+        "    severity : Int\n",
+        "    message  : Str\n",
+        "    layer    : Int\n",
+        "\n",
+        "fn classify(signal : Signal) -> ThreatLevel:\n",
+        "    match signal.severity:\n",
+        "        0 => return ThreatLevel.Clear\n",
+        "        1 => return ThreatLevel.Advisory(signal.message)\n",
+        "        _ => return ThreatLevel.Critical(signal.layer, signal.message)\n",
+        "\n",
+        "task monitor() uses [ipc.read, collective.emit]:\n",
+        "    let@ channel = ipc.open_channel()?\n",
+        "    defer channel.close()\n",
+        "    for signal in channel.signals:\n",
+        "        let level = classify(signal)\n",
+        "        collective.emit(level)\n",
+    );
+
+    #[test]
+    fn p2_19_aegis_monitor_zero_errors() {
+        let r = crate::parse(AEGIS_MONITOR, file());
+
+        // ── THE GATE ─────────────────────────────────────────
+        // Zero parse errors. No exceptions. No excuses.
+        assert!(
+            r.errors.is_empty(),
+            "Aegis Monitor produced {} parse error(s):\n{}",
+            r.errors.len(),
+            r.errors.iter().enumerate()
+                .map(|(i, e)| format!("  [{}] {:?}", i+1, e))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        // ── Module ────────────────────────────────────────────
+        let module = r.program.module.as_ref()
+            .expect("expected module declaration");
+        assert_eq!(module.path[0].name, "aieonyx",   "module path[0]");
+        assert_eq!(module.path[1].name, "aegis",     "module path[1]");
+        assert_eq!(module.path[2].name, "monitor",   "module path[2]");
+
+        // ── Imports ───────────────────────────────────────────
+        assert_eq!(r.program.imports.len(), 2, "expected 2 imports");
+        assert_eq!(r.program.imports[0].alias.as_ref().unwrap().name, "ipc");
+        assert_eq!(r.program.imports[1].alias.as_ref().unwrap().name, "collective");
+
+        // ── Top-level items ───────────────────────────────────
+        // ThreatLevel enum, Signal struct, classify fn, monitor task
+        assert_eq!(r.program.items.len(), 4,
+            "expected 4 top-level items (enum, struct, fn, task), got {}",
+            r.program.items.len());
+
+        // ── ThreatLevel enum ──────────────────────────────────
+        match &r.program.items[0] {
+            TopLevelItem::Enum(e) => {
+                assert_eq!(e.name.name, "ThreatLevel");
+                assert_eq!(e.variants.len(), 3, "ThreatLevel should have 3 variants");
+                assert_eq!(e.variants[0].name.name, "Clear");
+                assert_eq!(e.variants[1].name.name, "Advisory");
+                assert_eq!(e.variants[1].fields.len(), 1);
+                assert_eq!(e.variants[2].name.name, "Critical");
+                assert_eq!(e.variants[2].fields.len(), 2);
+            }
+            other => panic!("item[0] should be ThreatLevel enum, got {:?}", other),
+        }
+
+        // ── Signal struct ─────────────────────────────────────
+        match &r.program.items[1] {
+            TopLevelItem::Struct(s) => {
+                assert_eq!(s.name.name, "Signal");
+                assert_eq!(s.fields.len(), 3, "Signal should have 3 fields");
+                assert_eq!(s.fields[0].name.name, "severity");
+                assert_eq!(s.fields[1].name.name, "message");
+                assert_eq!(s.fields[2].name.name, "layer");
+            }
+            other => panic!("item[1] should be Signal struct, got {:?}", other),
+        }
+
+        // ── classify function ─────────────────────────────────
+        match &r.program.items[2] {
+            TopLevelItem::Fn(f) => {
+                assert_eq!(f.name.name, "classify");
+                assert_eq!(f.params.len(), 1);
+                assert_eq!(f.params[0].name.name, "signal");
+                assert!(f.ret_type.is_some(), "classify should have return type");
+                assert_eq!(f.body.stmts.len(), 1,
+                    "classify body should have 1 match statement");
+                assert!(matches!(f.body.stmts[0], Stmt::Match(_)),
+                    "classify body should be a match statement");
+            }
+            other => panic!("item[2] should be classify fn, got {:?}", other),
+        }
+
+        // ── monitor task ──────────────────────────────────────
+        match &r.program.items[3] {
+            TopLevelItem::Task(t) => {
+                assert_eq!(t.name.name, "monitor");
+                assert!(t.uses.is_some(), "monitor should have uses clause");
+                let uses = t.uses.as_ref().unwrap();
+                assert_eq!(uses.effects.len(), 2,
+                    "monitor should declare 2 effects");
+                assert_eq!(uses.effects[0].parts[0].name, "ipc");
+                assert_eq!(uses.effects[1].parts[0].name, "collective");
+                // Body: let@, defer, for
+                assert!(t.body.stmts.len() >= 3,
+                    "monitor body should have at least 3 statements");
+                assert!(matches!(t.body.stmts[0], Stmt::Ephemeral(_)),
+                    "first stmt should be let@ (Ephemeral)");
+                assert!(matches!(t.body.stmts[1], Stmt::Defer(_)),
+                    "second stmt should be defer");
+                assert!(matches!(t.body.stmts[2], Stmt::For(_)),
+                    "third stmt should be for");
+            }
+            other => panic!("item[3] should be monitor task, got {:?}", other),
+        }
+
+        // ── PHASE 2 COMPLETE ──────────────────────────────────
+        // If you are reading this assertion — Phase 2 is done.
+        // AXON is no longer just documents.
+        // AXON is a language.
+        println!("\n  ✓ Aegis Monitor parsed with zero errors.");
+        println!("  ✓ Module: aieonyx.aegis.monitor");
+        println!("  ✓ 2 imports verified");
+        println!("  ✓ ThreatLevel enum — 3 variants");
+        println!("  ✓ Signal struct — 3 fields");
+        println!("  ✓ classify fn — match statement body");
+        println!("  ✓ monitor task — let@, defer, for");
+        println!("\n  PHASE 2 COMPLETE. AXON IS A LANGUAGE.\n");
+    }
 }
