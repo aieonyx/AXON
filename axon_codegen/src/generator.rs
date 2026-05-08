@@ -371,10 +371,10 @@ impl CodeGen {
             .unwrap_or_default();
         let body  = self.emit_expr_str(&arm.body);
 
-        // If body is None literal (unparsed return/stmt in arm),
-        // emit a block arm — P3-02 will handle full stmt-in-arm bodies
-        if body == "None" && arm.guard.is_none() {
-            self.line(&format!("{}{} => {{ /* stmt body: P3-02 */ }},", pat, guard));
+        // Return expressions need special arm syntax
+        if body.starts_with("return") {
+            // `return expr` in a match arm — emit as a block
+            self.line(&format!("{}{} => {{ {}; }},", pat, guard, body));
         } else {
             self.line(&format!("{}{} => {},", pat, guard, body));
         }
@@ -516,6 +516,20 @@ impl CodeGen {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("vec![{}]", items)
+            }
+
+            Expr::Return(val, _) => {
+                match val.as_ref() {
+                    Some(e) => format!("return {}", self.emit_expr_str(e)),
+                    None    => "return".into(),
+                }
+            }
+
+            Expr::Break_(val, _) => {
+                match val.as_ref() {
+                    Some(e) => format!("break {}", self.emit_expr_str(e)),
+                    None    => "break".into(),
+                }
             }
 
             _ => "/* expr */".into(),

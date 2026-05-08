@@ -32,9 +32,9 @@ pub struct Signal {
 
 pub fn classify(signal: Signal) -> ThreatLevel{
     match signal.severity {
-        0 => { /* stmt body: P3-02 */ },
-        1 => { /* stmt body: P3-02 */ },
-        _ => { /* stmt body: P3-02 */ },
+        0 => { return ThreatLevel::Clear; },
+        1 => { return ThreatLevel::Advisory{ signal.message }; },
+        _ => { return ThreatLevel::Critical{ signal.layer, signal.message }; },
     }
 }
 
