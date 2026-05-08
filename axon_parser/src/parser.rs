@@ -19,6 +19,8 @@ use crate::ast::{
     ReturnStmt, ExprStmt,
     IfStmt, ForStmt, WhileStmt,
     DeferStmt, WithStmt,
+    MatchStmt, MatchArm,
+    Pattern, PatternField, EnumPattern,
     Expr, Literal,
     Decorator, DecoratorArg,
     UsesList, EffectName,
@@ -547,6 +549,9 @@ impl<'src> Parser<'src> {
                 Stmt::Defer(DeferStmt { span, expr })
             }
 
+            // match expr: arms
+            TokenKind::Match => { self.parse_match_stmt()? }
+
             // with expr as name: body
             TokenKind::With => { self.parse_with_stmt()? }
 
@@ -639,6 +644,193 @@ impl<'src> Parser<'src> {
         Some(Stmt::While(WhileStmt { span, condition, body }))
     }
 
+    fn parse_match_stmt(&mut self) -> Option<Stmt> {
+        let span = self.current_span();
+        self.expect(&TokenKind::Match)?;
+        let subject = self.parse_expr()?;
+        self.expect(&TokenKind::Colon)?;
+        self.eat(&TokenKind::Newline);
+        self.eat(&TokenKind::Indent);
+
+        let mut arms = Vec::new();
+        while !self.at_eof() && !self.at(&TokenKind::Dedent) {
+            self.skip_newlines();
+            if self.at(&TokenKind::Dedent) || self.at_eof() { break; }
+            if let Some(arm) = self.parse_match_arm() {
+                arms.push(arm);
+            } else {
+                // Skip bad line
+                while !self.at_eof()
+                    && !matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Dedent) {
+                    self.advance();
+                }
+                self.eat(&TokenKind::Newline);
+            }
+        }
+
+        self.eat(&TokenKind::Dedent);
+        Some(Stmt::Match(MatchStmt { span, subject, arms }))
+    }
+
+    fn parse_match_arm(&mut self) -> Option<MatchArm> {
+        let span = self.current_span();
+
+        // Parse pattern
+        let pattern = self.parse_pattern()?;
+
+        // Optional guard: if expr
+        let guard = if self.at(&TokenKind::If) {
+            self.advance();
+            self.parse_expr()
+        } else { None };
+
+        // =>
+        self.expect(&TokenKind::FatArrow)?;
+
+        // Body — for single-line arms: one expression
+        // For multi-line: parse until newline
+        let body = if matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Dedent) {
+            // Empty arm body — use None literal
+            Expr::Lit(Literal::None(span))
+        } else {
+            self.parse_expr().unwrap_or(Expr::Lit(Literal::None(span)))
+        };
+
+        self.eat(&TokenKind::Newline);
+        Some(MatchArm { span, pattern, guard, body })
+    }
+
+    // ── Pattern parsing ───────────────────────────────────────
+
+    pub fn parse_pattern(&mut self) -> Option<Pattern> {
+        let span = self.current_span();
+
+        // Try primary pattern first
+        let mut pat = self.parse_pattern_primary()?;
+
+        // Or pattern: pat | pat | pat
+        if self.at(&TokenKind::Pipe) {
+            let mut pats = vec![pat];
+            while self.at(&TokenKind::Pipe) {
+                self.advance();
+                if let Some(p) = self.parse_pattern_primary() {
+                    pats.push(p);
+                }
+            }
+            pat = Pattern::Or(pats, span);
+        }
+
+        Some(pat)
+    }
+
+    fn parse_pattern_primary(&mut self) -> Option<Pattern> {
+        let span = self.current_span();
+
+        match self.peek_kind().clone() {
+
+            // Wildcard: _
+            TokenKind::Ident(ref n) if n == "_" => {
+                self.advance();
+                Some(Pattern::Wildcard(span))
+            }
+
+            // Identifier — could be binding or enum variant
+            TokenKind::Ident(name) => {
+                self.advance();
+                let ident = Ident::new(name, span);
+
+                // Check for enum variant with fields: Variant(pat, pat)
+                if self.at(&TokenKind::LParen) {
+                    self.advance();
+                    let mut fields = Vec::new();
+                    while !self.at_eof() && !self.at(&TokenKind::RParen) {
+                        let fspan = self.current_span();
+                        // named: ident: pat  OR  positional: pat
+                        if matches!(self.peek_kind(), TokenKind::Ident(_)) {
+                            let saved = self.pos;
+                            let tok   = self.advance();
+                            if self.at(&TokenKind::Colon) {
+                                self.advance();
+                                if let TokenKind::Ident(n) = tok.kind {
+                                    let label = Ident::new(n, tok.span);
+                                    let inner = self.parse_pattern()?;
+                                    fields.push(PatternField::Named(label, inner));
+                                }
+                            } else {
+                                self.pos = saved;
+                                let inner = self.parse_pattern()?;
+                                fields.push(PatternField::Positional(inner));
+                            }
+                        } else {
+                            let inner = self.parse_pattern()?;
+                            fields.push(PatternField::Positional(inner));
+                        }
+                        self.eat(&TokenKind::Comma);
+                    }
+                    self.expect(&TokenKind::RParen)?;
+                    Some(Pattern::Enum(EnumPattern { span, name: ident, fields }))
+                } else {
+                    // Could be enum unit variant or binding
+                    // In AXON, uppercase = variant, lowercase = binding
+                    let first_char = ident.name.chars().next().unwrap_or('a');
+                    if first_char.is_uppercase() {
+                        Some(Pattern::Enum(EnumPattern { span, name: ident, fields: vec![] }))
+                    } else {
+                        Some(Pattern::Binding(ident))
+                    }
+                }
+            }
+
+            // Literal patterns
+            TokenKind::IntLit(n) => {
+                let n = n; self.advance();
+                Some(Pattern::Literal(Literal::Int(n, span)))
+            }
+            TokenKind::FloatLit(f) => {
+                let f = f; self.advance();
+                Some(Pattern::Literal(Literal::Float(f, span)))
+            }
+            TokenKind::StrLit(s) => {
+                let s = s; self.advance();
+                Some(Pattern::Literal(Literal::Str(s, span)))
+            }
+            TokenKind::BoolLit(b) => {
+                let b = b; self.advance();
+                Some(Pattern::Literal(Literal::Bool(b, span)))
+            }
+            TokenKind::True => {
+                self.advance();
+                Some(Pattern::Literal(Literal::Bool(true, span)))
+            }
+            TokenKind::False => {
+                self.advance();
+                Some(Pattern::Literal(Literal::Bool(false, span)))
+            }
+            TokenKind::None => {
+                self.advance();
+                Some(Pattern::Literal(Literal::None(span)))
+            }
+
+            // Tuple pattern: (pat, pat)
+            TokenKind::LParen => {
+                self.advance();
+                let mut pats = Vec::new();
+                while !self.at_eof() && !self.at(&TokenKind::RParen) {
+                    if let Some(p) = self.parse_pattern() { pats.push(p); }
+                    if self.eat(&TokenKind::Comma).is_none() { break; }
+                }
+                self.expect(&TokenKind::RParen)?;
+                if pats.len() == 1 {
+                    Some(pats.remove(0)) // strip single parens
+                } else {
+                    Some(Pattern::Tuple(pats, span))
+                }
+            }
+
+            _ => None,
+        }
+    }
+
     fn parse_with_stmt(&mut self) -> Option<Stmt> {
         let span = self.current_span();
         self.expect(&TokenKind::With)?;
@@ -650,174 +842,63 @@ impl<'src> Parser<'src> {
         Some(Stmt::With(WithStmt { span, expr, binding, body }))
     }
 
-    // ── Expression parsing (basic — P2-11 adds Pratt parser) ──
+    // ── P2-11: Pratt Expression Parser ──────────────────────────
 
+    /// Top-level expression entry point.
+    /// min_bp: minimum binding power — only consume operators with bp > min_bp
     pub fn parse_expr(&mut self) -> Option<Expr> {
-        self.parse_expr_comparison()
+        self.pratt_expr(0)
     }
 
-    fn parse_expr_comparison(&mut self) -> Option<Expr> {
-        let mut left = self.parse_expr_additive()?;
+    fn pratt_expr(&mut self, min_bp: u8) -> Option<Expr> {
+        // Null denotation (prefix / primary)
+        let mut left = self.parse_nud()?;
+
         loop {
-            let span = self.current_span();
-            let op = match self.peek_kind() {
-                TokenKind::EqEq    => { self.advance(); crate::ast::BinOp::Eq  }
-                TokenKind::BangEq  => { self.advance(); crate::ast::BinOp::NotEq }
-                TokenKind::Lt      => { self.advance(); crate::ast::BinOp::Lt  }
-                TokenKind::Gt      => { self.advance(); crate::ast::BinOp::Gt  }
-                TokenKind::LtEq    => { self.advance(); crate::ast::BinOp::LtEq}
-                TokenKind::GtEq    => { self.advance(); crate::ast::BinOp::GtEq}
-                _ => break,
+            // Check for pipe: expr |> fn(args)
+            if self.at(&TokenKind::PipeForward) {
+                if min_bp >= 5 { break; }
+                left = self.parse_pipe_expr(left)?;
+                continue;
+            }
+
+            // Get infix binding power of next token
+            let (l_bp, r_bp) = match self.infix_bp() {
+                Some(bp) => bp,
+                None => break,
             };
-            let right = self.parse_expr_additive()?;
-            left = Expr::BinOp(Box::new(crate::ast::BinOpExpr {
-                span, op, lhs: left, rhs: right,
-            }));
+
+            if l_bp <= min_bp { break; }
+
+            left = self.parse_led(left, r_bp)?;
         }
+
         Some(left)
     }
 
-    fn parse_expr_additive(&mut self) -> Option<Expr> {
-        let mut left = self.parse_expr_multiplicative()?;
-        loop {
-            let span = self.current_span();
-            let op = match self.peek_kind() {
-                TokenKind::Plus  => { self.advance(); crate::ast::BinOp::Add }
-                TokenKind::Minus => { self.advance(); crate::ast::BinOp::Sub }
-                _ => break,
-            };
-            let right = self.parse_expr_multiplicative()?;
-            left = Expr::BinOp(Box::new(crate::ast::BinOpExpr {
-                span, op, lhs: left, rhs: right,
-            }));
-        }
-        Some(left)
-    }
-
-    fn parse_expr_multiplicative(&mut self) -> Option<Expr> {
-        let mut left = self.parse_expr_unary()?;
-        loop {
-            let span = self.current_span();
-            let op = match self.peek_kind() {
-                TokenKind::Star    => { self.advance(); crate::ast::BinOp::Mul }
-                TokenKind::Slash   => { self.advance(); crate::ast::BinOp::Div }
-                TokenKind::Percent => { self.advance(); crate::ast::BinOp::Mod }
-                _ => break,
-            };
-            let right = self.parse_expr_unary()?;
-            left = Expr::BinOp(Box::new(crate::ast::BinOpExpr {
-                span, op, lhs: left, rhs: right,
-            }));
-        }
-        Some(left)
-    }
-
-    fn parse_expr_unary(&mut self) -> Option<Expr> {
+    /// Null denotation — starts an expression
+    fn parse_nud(&mut self) -> Option<Expr> {
         let span = self.current_span();
-        match self.peek_kind() {
-            TokenKind::Minus => {
-                self.advance();
-                let expr = self.parse_expr_postfix()?;
-                Some(Expr::UnaryOp(Box::new(crate::ast::UnaryOpExpr {
-                    span, op: crate::ast::UnaryOp::Neg, expr,
-                })))
-            }
-            TokenKind::Bang => {
-                self.advance();
-                let expr = self.parse_expr_postfix()?;
-                Some(Expr::UnaryOp(Box::new(crate::ast::UnaryOpExpr {
-                    span, op: crate::ast::UnaryOp::Not, expr,
-                })))
-            }
-            _ => self.parse_expr_postfix(),
-        }
-    }
 
-    fn parse_expr_postfix(&mut self) -> Option<Expr> {
-        let mut expr = self.parse_expr_primary()?;
-        loop {
-            let span = self.current_span();
-            match self.peek_kind() {
-                // Method call or field access: expr.name
-                TokenKind::Dot => {
-                    self.advance();
-                    let name = self.parse_ident("field or method name")?;
-                    if self.at(&TokenKind::LParen) {
-                        // Method call: expr.method(args)
-                        self.advance();
-                        let args = self.parse_call_args();
-                        self.expect(&TokenKind::RParen)?;
-                        expr = Expr::MethodCall(Box::new(crate::ast::MethodCallExpr {
-                            span, receiver: Box::new(expr), method: name,
-                            generics: vec![], args,
-                        }));
-                    } else {
-                        // Field access: expr.field
-                        expr = Expr::FieldAccess(Box::new(FieldAccessExpr {
-                            span, object: Box::new(expr), field: name,
-                        }));
-                    }
-                }
-                // Function call: expr(args)
-                TokenKind::LParen => {
-                    self.advance();
-                    let args = self.parse_call_args();
-                    self.expect(&TokenKind::RParen)?;
-                    // For now only handle direct ident calls
-                    // P2-11 will handle complex callees
-                    if let Expr::Ident(id) = expr {
-                        expr = Expr::Call(Box::new(crate::ast::CallExpr {
-                            span, callee: id, generics: vec![], args,
-                        }));
-                    } else {
-                        // Skip complex callee for now
-                        expr = Expr::Lit(Literal::None(span));
-                    }
-                }
-                // Index: expr[idx]
-                TokenKind::LBracket => {
-                    self.advance();
-                    let idx = self.parse_expr()?;
-                    self.expect(&TokenKind::RBracket)?;
-                    expr = Expr::Index(Box::new(crate::ast::IndexExpr {
-                        span, object: Box::new(expr), index: Box::new(idx),
-                    }));
-                }
-                // ? propagation
-                TokenKind::Question => {
-                    self.advance();
-                    expr = Expr::Propagate(Box::new(expr), span);
-                }
-                _ => break,
-            }
-        }
-        Some(expr)
-    }
-
-    fn parse_expr_primary(&mut self) -> Option<Expr> {
-        let span = self.current_span();
         match self.peek_kind().clone() {
-            // Integer literal
+
+            // ── Literals ───────────────────────────────────────
             TokenKind::IntLit(n) => {
                 self.advance();
                 Some(Expr::Lit(Literal::Int(n, span)))
             }
-            // Float literal
             TokenKind::FloatLit(f) => {
                 self.advance();
                 Some(Expr::Lit(Literal::Float(f, span)))
             }
-            // String literal
             TokenKind::StrLit(s) => {
                 self.advance();
                 Some(Expr::Lit(Literal::Str(s, span)))
             }
-            // Bool literal
             TokenKind::BoolLit(b) => {
                 self.advance();
                 Some(Expr::Lit(Literal::Bool(b, span)))
             }
-            // true / false
             TokenKind::True => {
                 self.advance();
                 Some(Expr::Lit(Literal::Bool(true, span)))
@@ -826,44 +907,228 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Some(Expr::Lit(Literal::Bool(false, span)))
             }
-            // None
             TokenKind::None => {
                 self.advance();
                 Some(Expr::Lit(Literal::None(span)))
             }
-            // Identifier or function call
+
+            // ── Identifier ─────────────────────────────────────
             TokenKind::Ident(name) => {
                 self.advance();
                 Some(Expr::Ident(Ident::new(name, span)))
             }
-            // Parenthesised expression
+
+            // ── Unary operators ────────────────────────────────
+            TokenKind::Minus => {
+                self.advance();
+                let expr = self.pratt_expr(70)?; // high bp for unary
+                Some(Expr::UnaryOp(Box::new(crate::ast::UnaryOpExpr {
+                    span, op: crate::ast::UnaryOp::Neg, expr,
+                })))
+            }
+            TokenKind::Bang => {
+                self.advance();
+                let expr = self.pratt_expr(70)?;
+                Some(Expr::UnaryOp(Box::new(crate::ast::UnaryOpExpr {
+                    span, op: crate::ast::UnaryOp::Not, expr,
+                })))
+            }
+
+            // ── Grouped expression ─────────────────────────────
             TokenKind::LParen => {
                 self.advance();
-                let inner = self.parse_expr()?;
+                let inner = self.pratt_expr(0)?;
                 self.expect(&TokenKind::RParen)?;
                 Some(inner)
             }
-            // List literal: [a, b, c]
+
+            // ── List literal: [a, b, c] ────────────────────────
             TokenKind::LBracket => {
                 self.advance();
-                let mut items = Vec::new();
+                let mut elements = Vec::new();
                 while !self.at_eof() && !self.at(&TokenKind::RBracket) {
-                    if let Some(e) = self.parse_expr() { items.push(e); }
+                    if let Some(e) = self.pratt_expr(0) { elements.push(e); }
                     if self.eat(&TokenKind::Comma).is_none() { break; }
                 }
                 self.expect(&TokenKind::RBracket)?;
-                Some(Expr::List(crate::ast::ListExpr { span, elements: items }))
+                Some(Expr::List(crate::ast::ListExpr { span, elements }))
             }
-            _ => {
-                // Don't error here — caller will decide
-                None
-            }
+
+            _ => None,
         }
+    }
+
+    /// Infix binding power — returns (left_bp, right_bp) or None
+    fn infix_bp(&self) -> Option<(u8, u8)> {
+        match self.peek_kind() {
+            // Logical
+            TokenKind::Or         => Some((10, 11)),
+            TokenKind::And        => Some((20, 21)),
+            // Comparison — non-associative (30/31)
+            TokenKind::EqEq       => Some((30, 31)),
+            TokenKind::BangEq     => Some((30, 31)),
+            TokenKind::Lt         => Some((30, 31)),
+            TokenKind::Gt         => Some((30, 31)),
+            TokenKind::LtEq       => Some((30, 31)),
+            TokenKind::GtEq       => Some((30, 31)),
+            // Range
+            TokenKind::DotDot     => Some((35, 36)),
+            TokenKind::DotDotEq   => Some((35, 36)),
+            // Additive
+            TokenKind::Plus       => Some((40, 41)),
+            TokenKind::Minus      => Some((40, 41)),
+            // Multiplicative
+            TokenKind::Star       => Some((50, 51)),
+            TokenKind::Slash      => Some((50, 51)),
+            TokenKind::Percent    => Some((50, 51)),
+            // Postfix (call, field, index, ?) — highest infix bp
+            TokenKind::Dot        => Some((80, 81)),
+            TokenKind::LParen     => Some((80, 81)),
+            TokenKind::LBracket   => Some((80, 81)),
+            TokenKind::Question   => Some((80, 81)),
+            TokenKind::Bang       => Some((80, 81)),  // capability pin !
+            _ => None,
+        }
+    }
+
+    /// Left denotation — continues an expression with an infix/postfix operator
+    fn parse_led(&mut self, left: Expr, r_bp: u8) -> Option<Expr> {
+        let span = self.current_span();
+
+        match self.peek_kind().clone() {
+
+            // ── Binary operators ───────────────────────────────
+            TokenKind::Or         => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Or,     r)) }
+            TokenKind::And        => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::And,    r)) }
+            TokenKind::EqEq       => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Eq,     r)) }
+            TokenKind::BangEq     => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::NotEq,  r)) }
+            TokenKind::Lt         => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Lt,     r)) }
+            TokenKind::Gt         => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Gt,     r)) }
+            TokenKind::LtEq       => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::LtEq,   r)) }
+            TokenKind::GtEq       => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::GtEq,   r)) }
+            TokenKind::DotDot     => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Range,  r)) }
+            TokenKind::DotDotEq   => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::RangeInclusive, r)) }
+            TokenKind::Plus       => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Add,    r)) }
+            TokenKind::Minus      => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Sub,    r)) }
+            TokenKind::Star       => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Mul,    r)) }
+            TokenKind::Slash      => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Div,    r)) }
+            TokenKind::Percent    => { self.advance(); let r = self.pratt_expr(r_bp)?; Some(self.bin(span, left, crate::ast::BinOp::Mod,    r)) }
+
+            // ── Field access: expr.field  or  expr.method(args) ─
+            TokenKind::Dot => {
+                self.advance();
+                let name = self.parse_ident("field or method name")?;
+                if self.at(&TokenKind::LParen) {
+                    self.advance();
+                    let args = self.parse_call_args();
+                    self.expect(&TokenKind::RParen)?;
+                    Some(Expr::MethodCall(Box::new(crate::ast::MethodCallExpr {
+                        span, receiver: Box::new(left), method: name,
+                        generics: vec![], args,
+                    })))
+                } else {
+                    Some(Expr::FieldAccess(Box::new(FieldAccessExpr {
+                        span, object: Box::new(left), field: name,
+                    })))
+                }
+            }
+
+            // ── Function call: expr(args) ──────────────────────
+            TokenKind::LParen => {
+                self.advance();
+                let args = self.parse_call_args();
+                self.expect(&TokenKind::RParen)?;
+                // Callee must be an ident for CallExpr
+                if let Expr::Ident(id) = left {
+                    Some(Expr::Call(Box::new(crate::ast::CallExpr {
+                        span, callee: id, generics: vec![], args,
+                    })))
+                } else {
+                    // Method-style fallback — wrap as None for now
+                    Some(Expr::Lit(Literal::None(span)))
+                }
+            }
+
+            // ── Index: expr[idx] ───────────────────────────────
+            TokenKind::LBracket => {
+                self.advance();
+                let idx = self.pratt_expr(0)?;
+                self.expect(&TokenKind::RBracket)?;
+                Some(Expr::Index(Box::new(crate::ast::IndexExpr {
+                    span, object: Box::new(left), index: Box::new(idx),
+                })))
+            }
+
+            // ── ? propagation ──────────────────────────────────
+            TokenKind::Question => {
+                self.advance();
+                Some(Expr::Propagate(Box::new(left), span))
+            }
+
+            // ── ! capability pin ───────────────────────────────
+            TokenKind::Bang => {
+                self.advance();
+                let method = self.parse_ident("capability method")?;
+                if self.at(&TokenKind::LParen) {
+                    self.advance();
+                    let args = self.parse_call_args();
+                    self.expect(&TokenKind::RParen)?;
+                    Some(Expr::CapPin(Box::new(crate::ast::CapPinExpr {
+                        span,
+                        receiver   : left,
+                        method,
+                        args,
+                        infallible : false,
+                    })))
+                } else {
+                    Some(Expr::Lit(Literal::None(span)))
+                }
+            }
+
+            _ => Some(left),
+        }
+    }
+
+    /// Helper — build a BinOpExpr
+    fn bin(&self, span: Span, left: Expr, op: crate::ast::BinOp, right: Expr) -> Expr {
+        Expr::BinOp(Box::new(crate::ast::BinOpExpr { span, op, lhs: left, rhs: right }))
+    }
+
+    /// Parse a pipe expression: left |> fn(args) [as Contract]
+    fn parse_pipe_expr(&mut self, head: Expr) -> Option<Expr> {
+        let span = self.current_span();
+        let mut stages = Vec::new();
+
+        while self.at(&TokenKind::PipeForward) {
+            let stage_span = self.current_span();
+            self.advance(); // consume |>
+
+            // Parse the pipe stage call
+            let call_expr = self.parse_nud()?;
+            let call = match call_expr {
+                Expr::Call(c)       => crate::ast::PipeCall::FnCall(*c),
+                Expr::MethodCall(m) => crate::ast::PipeCall::MethodCall(*m),
+                _ => return None,
+            };
+
+            // Optional: as Contract
+            let contract = if self.at(&TokenKind::As) {
+                self.advance();
+                self.parse_ident("contract type")
+            } else { None };
+
+            stages.push(crate::ast::PipeStage {
+                span: stage_span, call, contract,
+            });
+        }
+
+        Some(Expr::Pipe(Box::new(crate::ast::PipeExpr { span, head, stages })))
     }
 
     fn parse_call_args(&mut self) -> Vec<crate::ast::Arg> {
         let mut args = Vec::new();
-        while !self.at_eof() && !self.at(&TokenKind::RParen) {
+        while !self.at_eof() && !self.at(&TokenKind::RParen)
+            && !self.at(&TokenKind::RBracket) {
             let span = self.current_span();
             // Check for named arg: name: expr
             let label = if matches!(self.peek_kind(), TokenKind::Ident(_)) {
@@ -876,7 +1141,7 @@ impl<'src> Parser<'src> {
                     } else { None }
                 } else { self.pos = saved; None }
             } else { None };
-            let value = match self.parse_expr() {
+            let value = match self.pratt_expr(0) {
                 Some(e) => e,
                 None => break,
             };
@@ -884,9 +1149,7 @@ impl<'src> Parser<'src> {
             if self.eat(&TokenKind::Comma).is_none() { break; }
         }
         args
-    }
-
-    // ── Type parsing ──────────────────────────────────────────
+    }// ── Type parsing ──────────────────────────────────────────
 
     pub fn parse_type(&mut self) -> Option<Type> {
         let span = self.current_span();
@@ -1528,6 +1791,548 @@ mod tests {
                         assert!(matches!(s.init, Expr::Lit(Literal::Bool(true, _))));
                     }
                     other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    // ── P2-11: Expression tests ───────────────────────────────
+
+    #[test] fn test_expr_addition() {
+        let src = "fn f():
+    let x = 1 + 2
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => assert!(matches!(s.init, Expr::BinOp(_))),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_precedence_mul_over_add() {
+        // 2 + 3 * 4 should parse as 2 + (3 * 4)
+        let src = "fn f():
+    let x = 2 + 3 * 4
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        match &s.init {
+                            Expr::BinOp(b) => {
+                                // Outer op must be Add
+                                assert_eq!(b.op, crate::ast::BinOp::Add);
+                                // Right side must be Mul
+                                assert!(matches!(b.rhs, Expr::BinOp(_)));
+                            }
+                            other => panic!("expected BinOp, got {:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_comparison() {
+        let src = "fn f():
+    let ok = x == 42
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        match &s.init {
+                            Expr::BinOp(b) => assert_eq!(b.op, crate::ast::BinOp::Eq),
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_unary_neg() {
+        let src = "fn f():
+    let x = -42
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => assert!(matches!(s.init, Expr::UnaryOp(_))),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_function_call() {
+        let src = "fn f():
+    let x = add(1, 2)
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        match &s.init {
+                            Expr::Call(c) => {
+                                assert_eq!(c.callee.name, "add");
+                                assert_eq!(c.args.len(), 2);
+                            }
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_method_call() {
+        let src = "fn f():
+    let n = items.len()
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => assert!(matches!(s.init, Expr::MethodCall(_))),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_field_access() {
+        let src = "fn f():
+    let h = config.host
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        match &s.init {
+                            Expr::FieldAccess(fa) => assert_eq!(fa.field.name, "host"),
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_chained_field_access() {
+        // config.network.host should parse left to right
+        let src = "fn f():
+    let h = config.network.host
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        // outer: .host  inner: config.network
+                        match &s.init {
+                            Expr::FieldAccess(fa) => {
+                                assert_eq!(fa.field.name, "host");
+                                assert!(matches!(*fa.object, Expr::FieldAccess(_)));
+                            }
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_index() {
+        let src = "fn f():
+    let x = items[0]
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => assert!(matches!(s.init, Expr::Index(_))),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_propagate() {
+        let src = "fn f():
+    let x = open(path)?
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => assert!(matches!(s.init, Expr::Propagate(_, _))),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_list_literal() {
+        let src = "fn f():
+    let xs = [1, 2, 3]
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        match &s.init {
+                            Expr::List(l) => assert_eq!(l.elements.len(), 3),
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_grouped() {
+        // (1 + 2) * 3 — parens force addition first
+        let src = "fn f():
+    let x = (1 + 2) * 3
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        match &s.init {
+                            Expr::BinOp(b) => {
+                                assert_eq!(b.op, crate::ast::BinOp::Mul);
+                                // Left side must be Add (from parens)
+                                assert!(matches!(b.lhs, Expr::BinOp(_)));
+                            }
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_expr_complex_condition() {
+        // x > 0 and y < 10
+        let src = "fn f():
+    if x > 0 and y < 10:
+        pass
+";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::If(s) => assert!(matches!(s.condition, Expr::BinOp(_))),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    // ── P2-12: Match statement tests ─────────────────────────
+
+    #[test] fn test_parse_match_basic() {
+        let src = concat!(
+            "fn f():
+",
+            "    match level:
+",
+            "        Clear => 0
+",
+            "        _ => 1
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        assert_eq!(m.arms.len(), 2);
+                    }
+                    other => panic!("expected Match, got {:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_match_wildcard() {
+        let src = concat!(
+            "fn f():
+",
+            "    match x:
+",
+            "        _ => 0
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        assert!(matches!(m.arms[0].pattern, Pattern::Wildcard(_)));
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_match_binding() {
+        let src = concat!(
+            "fn f():
+",
+            "    match x:
+",
+            "        value => value
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        assert!(matches!(m.arms[0].pattern, Pattern::Binding(_)));
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_match_enum_variant_unit() {
+        let src = concat!(
+            "fn f():
+",
+            "    match level:
+",
+            "        Clear => 0
+",
+            "        _ => 1
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        match &m.arms[0].pattern {
+                            Pattern::Enum(e) => {
+                                assert_eq!(e.name.name, "Clear");
+                                assert_eq!(e.fields.len(), 0);
+                            }
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_match_enum_variant_with_fields() {
+        let src = concat!(
+            "fn f():
+",
+            "    match level:
+",
+            "        Advisory(detail) => detail
+",
+            "        _ => 0
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        match &m.arms[0].pattern {
+                            Pattern::Enum(e) => {
+                                assert_eq!(e.name.name, "Advisory");
+                                assert_eq!(e.fields.len(), 1);
+                            }
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_match_literal_pattern() {
+        let src = concat!(
+            "fn f():
+",
+            "    match x:
+",
+            "        0 => false
+",
+            "        1 => true
+",
+            "        _ => false
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        assert_eq!(m.arms.len(), 3);
+                        assert!(matches!(m.arms[0].pattern, Pattern::Literal(_)));
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_match_guard() {
+        let src = concat!(
+            "fn f():
+",
+            "    match x:
+",
+            "        n if n > 0 => true
+",
+            "        _ => false
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        assert!(m.arms[0].guard.is_some());
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_match_or_pattern() {
+        let src = concat!(
+            "fn f():
+",
+            "    match x:
+",
+            "        A | B => 1
+",
+            "        _ => 0
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        assert!(matches!(m.arms[0].pattern, Pattern::Or(_, _)));
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_full_threat_level_match() {
+        // The actual Aegis Monitor pattern
+        let src = concat!(
+            "fn classify(signal : Int) -> Int:
+",
+            "    match signal:
+",
+            "        Clear => 0
+",
+            "        Advisory(detail) => 1
+",
+            "        Critical(layer, detail) => 2
+",
+            "        _ => 0
+",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Match(m) => {
+                        assert_eq!(m.arms.len(), 4);
+                        // Clear — unit variant
+                        assert!(matches!(m.arms[0].pattern, Pattern::Enum(_)));
+                        // Advisory(detail) — variant with 1 field
+                        assert!(matches!(m.arms[1].pattern, Pattern::Enum(_)));
+                        // Critical(layer, detail) — variant with 2 fields
+                        match &m.arms[2].pattern {
+                            Pattern::Enum(e) => assert_eq!(e.fields.len(), 2),
+                            other => panic!("{:?}", other),
+                        }
+                        // _ — wildcard
+                        assert!(matches!(m.arms[3].pattern, Pattern::Wildcard(_)));
+                    }
+                    other => panic!("expected Match, got {:?}", other),
                 }
             }
             other => panic!("{:?}", other),
