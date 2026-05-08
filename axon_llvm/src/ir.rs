@@ -161,12 +161,69 @@ impl LlvmFunction {
     }
 }
 
+// ── Compilation Target ───────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Target {
+    /// x86-64 Linux (default, development)
+    X86_64Linux,
+    /// ARM64 Linux (general purpose)
+    Aarch64Linux,
+    /// ARM64 seL4 bare-metal (sovereign infrastructure target)
+    Aarch64Sel4,
+}
+
+impl Target {
+    pub fn triple(&self) -> &'static str {
+        match self {
+            Target::X86_64Linux   => "x86_64-unknown-linux-gnu",
+            Target::Aarch64Linux  => "aarch64-unknown-linux-gnu",
+            Target::Aarch64Sel4   => "aarch64-unknown-none-elf",
+        }
+    }
+
+    pub fn datalayout(&self) -> &'static str {
+        match self {
+            Target::X86_64Linux =>
+                "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
+            Target::Aarch64Linux | Target::Aarch64Sel4 =>
+                "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "x86_64" | "x86-64" | "amd64"          => Some(Target::X86_64Linux),
+            "arm64"  | "aarch64" | "aarch64-linux"  => Some(Target::Aarch64Linux),
+            "aarch64-sel4" | "sel4" | "seL4"        => Some(Target::Aarch64Sel4),
+            _ => None,
+        }
+    }
+
+    pub fn is_cross(&self) -> bool {
+        !matches!(self, Target::X86_64Linux)
+    }
+
+    /// llc binary name for this target
+    pub fn llc_bin(&self) -> &'static str { "llc-18" }
+
+    /// Linker for this target
+    pub fn linker(&self) -> &'static str {
+        match self {
+            Target::X86_64Linux  => "clang-18",
+            Target::Aarch64Linux => "aarch64-linux-gnu-gcc",
+            Target::Aarch64Sel4  => "aarch64-linux-gnu-gcc",
+        }
+    }
+}
+
 /// A complete LLVM module
 pub struct LlvmModule {
     pub name       : String,
     pub functions  : Vec<LlvmFunction>,
     pub globals    : Vec<String>,
     pub type_defs  : Vec<String>,
+    pub target     : Target,
 }
 
 impl LlvmModule {
@@ -176,7 +233,13 @@ impl LlvmModule {
             functions : Vec::new(),
             globals   : Vec::new(),
             type_defs : Vec::new(),
+            target    : Target::X86_64Linux,
         }
+    }
+
+    pub fn with_target(mut self, target: Target) -> Self {
+        self.target = target;
+        self
     }
 
     pub fn add_function(&mut self, func: LlvmFunction) {
@@ -191,8 +254,8 @@ impl LlvmModule {
         writeln!(out, "; Copyright © 2026 Edison Lepiten — AIEONYX").unwrap();
         writeln!(out, "; ============================================================").unwrap();
         writeln!(out).unwrap();
-        writeln!(out, "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"").unwrap();
-        writeln!(out, "target triple = \"x86_64-unknown-linux-gnu\"").unwrap();
+        writeln!(out, "target datalayout = \"{}\"", self.target.datalayout()).unwrap();
+        writeln!(out, "target triple = \"{}\"", self.target.triple()).unwrap();
         writeln!(out).unwrap();
 
         for td in &self.type_defs {
