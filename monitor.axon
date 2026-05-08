@@ -1,0 +1,27 @@
+module aieonyx.aegis.monitor
+
+import axon.sys.sel4.ipc as ipc
+import axon.mesh.collective as collective
+
+enum ThreatLevel:
+    Clear
+    Advisory(detail: Str)
+    Critical(layer: Int, detail: Str)
+
+struct Signal:
+    severity : Int
+    message  : Str
+    layer    : Int
+
+fn classify(signal : Signal) -> ThreatLevel:
+    match signal.severity:
+        0 => return ThreatLevel.Clear
+        1 => return ThreatLevel.Advisory(signal.message)
+        _ => return ThreatLevel.Critical(signal.layer, signal.message)
+
+task monitor() uses [ipc.read, collective.emit]:
+    let@ channel = ipc.open_channel()?
+    defer channel.close()
+    for signal in channel.signals:
+        let level = classify(signal)
+        collective.emit(level)

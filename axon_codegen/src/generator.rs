@@ -370,7 +370,14 @@ impl CodeGen {
             .map(|g| format!(" if {}", self.emit_expr_str(g)))
             .unwrap_or_default();
         let body  = self.emit_expr_str(&arm.body);
-        self.line(&format!("{}{} => {},", pat, guard, body));
+
+        // If body is None literal (unparsed return/stmt in arm),
+        // emit a block arm — P3-02 will handle full stmt-in-arm bodies
+        if body == "None" && arm.guard.is_none() {
+            self.line(&format!("{}{} => {{ /* stmt body: P3-02 */ }},", pat, guard));
+        } else {
+            self.line(&format!("{}{} => {},", pat, guard, body));
+        }
     }
 
     // ── Pattern → Rust pattern string ────────────────────────
@@ -445,16 +452,51 @@ impl CodeGen {
 
             Expr::MethodCall(m) => {
                 let recv = self.emit_expr_str(&m.receiver);
-                let args = m.args.iter()
-                    .map(|a| self.emit_expr_str(&a.value))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}.{}({})", recv, m.method.name, args)
+                let is_enum_constructor =
+                    recv.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                    && m.method.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+
+                if is_enum_constructor {
+                    // ThreatLevel.Advisory(detail: x) → ThreatLevel::Advisory { detail: x }
+                    let fields = m.args.iter()
+                        .map(|a| {
+                            let val = self.emit_expr_str(&a.value);
+                            if let Some(label) = &a.label {
+                                format!("{}: {}", label.name, val)
+                            } else {
+                                val
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if fields.is_empty() {
+                        format!("{}::{}", recv, m.method.name)
+                    } else {
+                        format!("{}::{}{{ {} }}", recv, m.method.name, fields)
+                    }
+                } else {
+                    let args = m.args.iter()
+                        .map(|a| self.emit_expr_str(&a.value))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}.{}({})", recv, m.method.name, args)
+                }
             }
 
             Expr::FieldAccess(f) => {
                 let obj = self.emit_expr_str(&f.object);
-                format!("{}.{}", obj, f.field.name)
+                // Detect enum path: Capitalized.Capitalized → :: separator
+                let is_enum_path = obj.chars().next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                    && f.field.name.chars().next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false);
+                if is_enum_path {
+                    format!("{}::{}", obj, f.field.name)
+                } else {
+                    format!("{}.{}", obj, f.field.name)
+                }
             }
 
             Expr::Index(i) => {
