@@ -1,0 +1,10 @@
+[package]
+name        = "axon_codegen"
+version     = "0.1.0"
+edition     = "2021"
+description = "AXON → Rust transpiler"
+authors     = ["Edison Lepiten <aieonyx>"]
+
+[dependencies]
+axon_lexer  = { workspace = true }
+axon_parser = { workspace = true }

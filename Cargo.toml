@@ -3,13 +3,15 @@ resolver = "2"
 members = [
     "axon_lexer",
     "axon_parser",
+    "axon_codegen",
     "axon_cli",
 ]
 
 # Workspace-wide dependency versions
 [workspace.dependencies]
-axon_lexer  = { path = "axon_lexer"  }
-axon_parser = { path = "axon_parser" }
+axon_lexer   = { path = "axon_lexer"   }
+axon_parser  = { path = "axon_parser"  }
+axon_codegen = { path = "axon_codegen" }
 
 [workspace.metadata]
 description = "AXON — AI-Native Programming Language"
