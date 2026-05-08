@@ -1,0 +1,12 @@
+[package]
+name        = "axon_llvm"
+version     = "0.1.0"
+edition     = "2021"
+description = "AXON LLVM native backend — Phase 4 (IR text emitter)"
+authors     = ["Edison Lepiten <aieonyx>"]
+
+[dependencies]
+axon_lexer  = { path = "../axon_lexer"  }
+axon_parser = { path = "../axon_parser" }
+# Zero external deps — we emit LLVM IR as text directly.
+# llc-18 / clang-18 compiles the .ll files to native binaries.
