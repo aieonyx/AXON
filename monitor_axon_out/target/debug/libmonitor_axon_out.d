@@ -1,0 +1,1 @@
+/home/edisonbl/axon/monitor_axon_out/target/debug/libmonitor_axon_out.rlib: /home/edisonbl/axon/axon_rt/src/lib.rs /home/edisonbl/axon/axon_std/src/lib.rs /home/edisonbl/axon/monitor_axon_out/src/lib.rs
