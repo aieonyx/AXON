@@ -527,6 +527,14 @@ pub enum Expr {
     Morph(Box<MorphExpr>),         // x ~> method()
     Temporal(TemporalExpr),        // @now @lifetime @epoch
     CapPin(Box<CapPinExpr>),       // expr!method() / expr?method()
+
+    // ── v0.3.1 additions ─────────────────────────────────────
+    /// Return expression — valid in match arm bodies and expression positions
+    /// Diverging type (!) — Rust also treats return as an expression
+    Return(Box<Option<Expr>>, Span),
+
+    /// Break expression — break [value]
+    Break_(Box<Option<Expr>>, Span),
 }
 
 /// Pipe expression — v0.3

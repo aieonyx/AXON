@@ -954,6 +954,24 @@ impl<'src> Parser<'src> {
                 Some(Expr::List(crate::ast::ListExpr { span, elements }))
             }
 
+            // Return as expression (valid in match arm bodies)
+            // return expr  OR  return (void)
+            TokenKind::Return => {
+                self.advance();
+                let value = if !matches!(self.peek_kind(),
+                    TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof |
+                    TokenKind::Comma   | TokenKind::RParen) {
+                    self.pratt_expr(0)
+                } else { None };
+                Some(Expr::Return(Box::new(value), span))
+            }
+
+            // Break as expression
+            TokenKind::Break => {
+                self.advance();
+                Some(Expr::Break_(Box::new(None), span))
+            }
+
             _ => None,
         }
     }
