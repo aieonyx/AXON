@@ -8,8 +8,8 @@
 
 #![allow(dead_code, unused_variables, unused_imports)]
 
-use axon::sys::sel4::ipc as ipc;
-use axon::mesh::collective as collective;
+// use axon::sys::sel4::ipc as ipc; // (axon_std: P3-07)
+// use axon::mesh::collective as collective; // (axon_std: P3-07)
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThreatLevel {
@@ -33,8 +33,8 @@ pub struct Signal {
 pub fn classify(signal: Signal) -> ThreatLevel{
     match signal.severity {
         0 => { return ThreatLevel::Clear; },
-        1 => { return ThreatLevel::Advisory{ signal.message }; },
-        _ => { return ThreatLevel::Critical{ signal.layer, signal.message }; },
+        1 => { return ThreatLevel::Advisory{ detail: signal.message }; },
+        _ => { return ThreatLevel::Critical{ layer: signal.layer, detail: signal.message }; },
     }
 }
 
