@@ -11,6 +11,7 @@ pub mod error;
 
 pub use codegen::LlvmCodegen;
 pub use error::LlvmCodegenError;
+pub use ir::Target;
 
 use axon_lexer::FileId;
 use std::fs;
@@ -18,18 +19,34 @@ use std::process::Command;
 
 /// Compile AXON source to LLVM IR text.
 pub fn llvm_codegen(source: &str) -> Result<String, LlvmCodegenError> {
+    llvm_codegen_for_target(source, Target::X86_64Linux)
+}
+
+pub fn llvm_codegen_for_target(
+    source: &str,
+    target: Target,
+) -> Result<String, LlvmCodegenError> {
     let result = axon_parser::parse(source, FileId(1));
     if !result.errors.is_empty() {
         return Err(LlvmCodegenError::ParseErrors(
             result.errors.iter().map(|e| format!("{:?}", e)).collect()));
     }
-
     let module_name = result.program.module.as_ref()
         .map(|m| m.path.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join("."))
         .unwrap_or_else(|| "axon_module".to_string());
-
     let mut gen = LlvmCodegen::new(&module_name);
+    gen.module = gen.module.with_target(target);
     gen.emit_program(&result.program)
+}
+
+pub fn llvm_codegen_to_file_for_target(
+    source: &str,
+    ll_path: &str,
+    target: Target,
+) -> Result<(), LlvmCodegenError> {
+    let ir = llvm_codegen_for_target(source, target)?;
+    std::fs::write(ll_path, ir)
+        .map_err(|e| LlvmCodegenError::IoError(e.to_string()))
 }
 
 /// Compile AXON source to LLVM IR and write to .ll file.
@@ -79,6 +96,75 @@ pub fn compile_to_binary(
     }
 
     Ok(())
+}
+
+
+pub struct NativeOutput {
+    pub ll_path     : String,
+    pub obj_path    : String,
+    pub binary_path : Option<String>,
+}
+
+/// P4-07: Full native pipeline — AXON → .ll → .o → binary
+pub fn compile_native(
+    source      : &str,
+    output_stem : &str,
+    target      : Target,
+    link        : bool,
+) -> Result<NativeOutput, LlvmCodegenError> {
+    use std::process::Command;
+    let ll_path  = format!("{}.ll", output_stem);
+    let obj_path = format!("{}.o",  output_stem);
+
+    // Step 1: AXON → LLVM IR
+    llvm_codegen_to_file_for_target(source, &ll_path, target.clone())?;
+    println!("  ✓ LLVM IR  → {}", ll_path);
+
+    // Step 2: .ll → .o via llc-18
+    let mut llc_args = vec![
+        "-filetype=obj".to_string(),
+        ll_path.clone(),
+        "-o".to_string(),
+        obj_path.clone(),
+    ];
+    if matches!(target, Target::Aarch64Linux | Target::Aarch64Sel4) {
+        llc_args.push("--march=aarch64".to_string());
+    }
+
+    let llc = Command::new("llc-18")
+        .args(&llc_args)
+        .output()
+        .map_err(|e| LlvmCodegenError::IoError(format!("llc-18 not found: {}", e)))?;
+
+    if !llc.status.success() {
+        return Err(LlvmCodegenError::IoError(
+            format!("llc-18 failed:
+{}", String::from_utf8_lossy(&llc.stderr))));
+    }
+    println!("  ✓ Object   → {}", obj_path);
+
+    // Step 3: link (x86_64 only unless cross-compiler available)
+    let binary_path = if link && !target.is_cross() {
+        let bin = output_stem.to_string();
+        let clang = Command::new("clang-18")
+            .args([&obj_path, "-o", &bin])
+            .output()
+            .map_err(|e| LlvmCodegenError::IoError(format!("clang-18 not found: {}", e)))?;
+        if !clang.status.success() {
+            return Err(LlvmCodegenError::IoError(
+                format!("clang-18 failed:
+{}", String::from_utf8_lossy(&clang.stderr))));
+        }
+        println!("  ✓ Binary   → {}", bin);
+        Some(bin)
+    } else {
+        if target.is_cross() {
+            println!("  ✓ Cross-target .o ready. Link with: {}", target.linker());
+        }
+        None
+    };
+
+    Ok(NativeOutput { ll_path, obj_path, binary_path })
 }
 
 // ── Tests ─────────────────────────────────────────────────────

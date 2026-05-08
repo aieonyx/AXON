@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use axon_lexer::FileId;
+use axon_llvm;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -35,10 +36,12 @@ fn print_usage() {
     println!("Usage: axon <command> [file]");
     println!();
     println!("Commands:");
-    println!("  version         Print AXON version");
-    println!("  check  <file>   Parse and verify an AXON source file");
-    println!("  build  <file>   Transpile AXON → Rust, generate Cargo project");
-    println!("  run    <file>   Build and execute an AXON program");
+    println!("  version                         Print AXON version");
+    println!("  check  <file>                   Parse and verify AXON source");
+    println!("  build  <file>                   Transpile AXON → Rust (Phase 3)");
+    println!("  build  --native <file>          Compile AXON → native binary (Phase 4)");
+    println!("  build  --native --target <t> <file>  Cross-compile (arm64, aarch64-sel4)");
+    println!("  run    <file>                   Build and execute AXON program");
 }
 
 fn cmd_version() {
@@ -76,14 +79,88 @@ fn cmd_check(args: &[String]) {
 }
 
 fn cmd_build(args: &[String]) {
-    if args.len() < 3 {
-        eprintln!("Usage: axon build <file.axon>");
-        std::process::exit(1);
+    // Parse flags: axon build [--native] [--target <t>] <file.axon>
+    let mut native = false;
+    let mut target_name: Option<String> = None;
+    let mut file_arg: Option<String> = None;
+
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--native" => { native = true; i += 1; }
+            "--target" => {
+                i += 1;
+                if i < args.len() {
+                    target_name = Some(args[i].clone());
+                    i += 1;
+                }
+            }
+            _ => { file_arg = Some(args[i].clone()); i += 1; }
+        }
     }
-    let axon_path = Path::new(&args[2]);
-    let project_dir = build_project(axon_path);
-    println!("axon build: {} → {}/", args[2], project_dir.display());
-    println!("  Run: cd {} && cargo build", project_dir.display());
+
+    let file = match file_arg {
+        Some(f) => f,
+        None => {
+            eprintln!("Usage: axon build [--native] [--target <t>] <file.axon>");
+            std::process::exit(1);
+        }
+    };
+
+    if native {
+        cmd_build_native(&file, target_name.as_deref());
+    } else {
+        let axon_path = Path::new(&file);
+        let project_dir = build_project(axon_path);
+        println!("axon build: {} → {}/", file, project_dir.display());
+        println!("  Run: cd {} && cargo build", project_dir.display());
+    }
+}
+
+fn cmd_build_native(file: &str, target_str: Option<&str>) {
+    let source = read_file(file);
+
+    // Resolve target
+    let target = match target_str {
+        Some(t) => match axon_llvm::Target::from_str(t) {
+            Some(t) => t,
+            None => {
+                eprintln!("axon: unknown target '{}'. Valid: x86_64, arm64, aarch64-sel4", t);
+                std::process::exit(1);
+            }
+        },
+        None => axon_llvm::Target::X86_64Linux,
+    };
+
+    let stem = Path::new(file)
+        .file_stem().unwrap_or_default()
+        .to_string_lossy().to_string();
+    let output_dir  = Path::new(file).parent().unwrap_or(Path::new("."));
+    let output_stem = output_dir.join(&stem).to_string_lossy().to_string();
+
+    println!("axon build --native: {} → {} ({})",
+        file, stem, target.triple());
+
+    // Only link when source has a main entry point
+    let has_main = source.contains("fn main") || source.contains("task main");
+    let link = !target.is_cross() && has_main;
+    match axon_llvm::compile_native(&source, &output_stem, target, link) {
+        Ok(out) => {
+            if let Some(bin) = &out.binary_path {
+                println!("
+  Binary ready: {}", bin);
+                println!("  Run: {}", bin);
+            } else {
+                println!("
+  Object ready: {}", out.obj_path);
+                println!("  IR ready:     {}", out.ll_path);
+            }
+        }
+        Err(e) => {
+            eprintln!("axon build --native failed: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn cmd_run(args: &[String]) {
