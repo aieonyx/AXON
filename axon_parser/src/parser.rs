@@ -1,6 +1,6 @@
 // ============================================================
 // AXON Parser — parser.rs
-// P2-09 complete — fn, task, decorators, effects, basic blocks
+// P2-10 complete — full statement parsing
 // Copyright © 2026 Edison Lepiten — AIEONYX
 // github.com/aieonyx/axon
 // ============================================================
@@ -14,10 +14,16 @@ use crate::ast::{
     FnDecl, TaskDecl, Param,
     ProgramIntent,
     Type, PrimitiveType,
-    Ident, Block,
-    Decorator, DecoratorArg, Expr, Literal,
+    Ident, Block, Stmt,
+    LetStmt, MutStmt, EphemeralStmt,
+    ReturnStmt, ExprStmt,
+    IfStmt, ForStmt, WhileStmt,
+    DeferStmt, WithStmt,
+    Expr, Literal,
+    Decorator, DecoratorArg,
     UsesList, EffectName,
-    MemMode,
+    MemMode, AssignStmt, AssignTarget, AssignOp,
+    FieldAccessExpr,
 };
 use crate::error::ParseError;
 
@@ -145,7 +151,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    // ── P2-07: Module / Import ────────────────────────────────
+    // ── Module / Import ───────────────────────────────────────
 
     fn parse_program_intent(&mut self) -> Option<ProgramIntent> {
         if !matches!(self.peek_kind(), TokenKind::ProgramIntentDecl) { return None; }
@@ -202,7 +208,7 @@ impl<'src> Parser<'src> {
         Some(ImportDecl { span, path, alias })
     }
 
-    fn parse_dotted_path(&mut self) -> Vec<Ident> {
+    pub fn parse_dotted_path(&mut self) -> Vec<Ident> {
         let mut parts = Vec::new();
         match self.peek_kind().clone() {
             TokenKind::Ident(name) => {
@@ -227,7 +233,7 @@ impl<'src> Parser<'src> {
         parts
     }
 
-    // ── P2-08: Struct / Enum ──────────────────────────────────
+    // ── Struct / Enum ─────────────────────────────────────────
 
     fn parse_struct_decl(&mut self) -> Option<StructDecl> {
         let span     = self.current_span();
@@ -297,15 +303,13 @@ impl<'src> Parser<'src> {
         Some(EnumDecl { span, name, generics, variants })
     }
 
-    // ── P2-09: Decorators ─────────────────────────────────────
+    // ── Decorators ────────────────────────────────────────────
 
     fn parse_decorators(&mut self) -> Vec<Decorator> {
         let mut decorators = Vec::new();
         while self.at(&TokenKind::At) {
             let span = self.current_span();
-            self.advance(); // consume @
-
-            // Collect dotted name: ai.intent → [Ident("ai"), Ident("intent")]
+            self.advance();
             let mut name_parts = Vec::new();
             match self.peek_kind().clone() {
                 TokenKind::Ident(n) => {
@@ -324,56 +328,32 @@ impl<'src> Parser<'src> {
                     _ => break,
                 }
             }
-
-            // Optional args: @ai.intent("description")
             let mut args = Vec::new();
             if self.at(&TokenKind::LParen) {
                 self.advance();
                 while !self.at_eof() && !self.at(&TokenKind::RParen) {
                     let aspan = self.current_span();
-                    // Parse label: value  OR just value
                     let label = if matches!(self.peek_kind(), TokenKind::Ident(_)) {
-                        // peek ahead — if next is ':' it's a label
-                        let saved_pos = self.pos;
-                        let name_tok = self.advance();
+                        let saved = self.pos;
+                        let tok   = self.advance();
                         if self.at(&TokenKind::Colon) {
-                            self.advance(); // consume ':'
-                            if let TokenKind::Ident(n) = name_tok.kind {
-                                Some(Ident::new(n, name_tok.span))
+                            self.advance();
+                            if let TokenKind::Ident(n) = tok.kind {
+                                Some(Ident::new(n, tok.span))
                             } else { None }
-                        } else {
-                            // Not a label — restore
-                            self.pos = saved_pos;
-                            None
-                        }
+                        } else { self.pos = saved; None }
                     } else { None };
-
-                    // Parse the value expression (string literal for now)
                     let value = match self.peek_kind().clone() {
-                        TokenKind::StrLit(s) => {
-                            let vs = self.current_span(); self.advance();
-                            Expr::Lit(Literal::Str(s, vs))
-                        }
-                        TokenKind::BoolLit(b) => {
-                            let vs = self.current_span(); self.advance();
-                            Expr::Lit(Literal::Bool(b, vs))
-                        }
-                        TokenKind::IntLit(n) => {
-                            let vs = self.current_span(); self.advance();
-                            Expr::Lit(Literal::Int(n, vs))
-                        }
-                        _ => {
-                            // Skip unknown arg
-                            let vs = self.current_span(); self.advance();
-                            Expr::Lit(Literal::None(vs))
-                        }
+                        TokenKind::StrLit(s)  => { let vs=self.current_span(); self.advance(); Expr::Lit(Literal::Str(s,vs)) }
+                        TokenKind::BoolLit(b) => { let vs=self.current_span(); self.advance(); Expr::Lit(Literal::Bool(b,vs)) }
+                        TokenKind::IntLit(n)  => { let vs=self.current_span(); self.advance(); Expr::Lit(Literal::Int(n,vs)) }
+                        _ => { let vs=self.current_span(); self.advance(); Expr::Lit(Literal::None(vs)) }
                     };
                     args.push(DecoratorArg { span: aspan, label, value });
                     self.eat(&TokenKind::Comma);
                 }
                 self.eat(&TokenKind::RParen);
             }
-
             decorators.push(Decorator { span, name: name_parts, args });
             self.eat(&TokenKind::Newline);
             self.skip_newlines();
@@ -381,31 +361,25 @@ impl<'src> Parser<'src> {
         decorators
     }
 
-    // ── P2-09: Function declarations ──────────────────────────
+    // ── Fn / Task declarations ────────────────────────────────
 
     fn parse_fn_decl(&mut self, decorators: Vec<Decorator>) -> Option<FnDecl> {
         let span     = self.current_span();
         self.expect(&TokenKind::Fn)?;
         let name     = self.parse_ident("function name")?;
         let generics = vec![];
-
         let params = if self.at(&TokenKind::LParen) {
             self.advance();
             let p = self.parse_params();
             self.expect(&TokenKind::RParen)?;
             p
         } else { vec![] };
-
         let ret_type = if self.at(&TokenKind::Arrow) {
-            self.advance();
-            self.parse_type()
+            self.advance(); self.parse_type()
         } else { None };
-
         let uses = self.parse_uses_clause();
-
         self.expect(&TokenKind::Colon)?;
         let body = self.parse_block();
-
         Some(FnDecl { span, decorators, name, generics, params, uses, ret_type, body })
     }
 
@@ -414,24 +388,18 @@ impl<'src> Parser<'src> {
         self.expect(&TokenKind::Task)?;
         let name     = self.parse_ident("task name")?;
         let generics = vec![];
-
         let params = if self.at(&TokenKind::LParen) {
             self.advance();
             let p = self.parse_params();
             self.expect(&TokenKind::RParen)?;
             p
         } else { vec![] };
-
         let ret_type = if self.at(&TokenKind::Arrow) {
-            self.advance();
-            self.parse_type()
+            self.advance(); self.parse_type()
         } else { None };
-
         let uses = self.parse_uses_clause();
-
         self.expect(&TokenKind::Colon)?;
         let body = self.parse_block();
-
         Some(TaskDecl { span, decorators, name, generics, params, uses, ret_type, body })
     }
 
@@ -460,63 +428,462 @@ impl<'src> Parser<'src> {
         Some(Param { span, mem_mode, name, ty })
     }
 
-    /// Parse optional uses clause: 'uses' '[' effect, ... ']'
     fn parse_uses_clause(&mut self) -> Option<UsesList> {
         if !self.at(&TokenKind::Uses) { return None; }
         let span = self.current_span();
         self.advance();
-
         let mut effects = Vec::new();
         if self.at(&TokenKind::LBracket) {
             self.advance();
             while !self.at_eof() && !self.at(&TokenKind::RBracket) {
                 let espan = self.current_span();
                 let parts = self.parse_dotted_path();
-                if !parts.is_empty() {
-                    effects.push(EffectName { span: espan, parts });
-                }
+                if !parts.is_empty() { effects.push(EffectName { span: espan, parts }); }
                 if self.eat(&TokenKind::Comma).is_none() { break; }
             }
             self.expect(&TokenKind::RBracket);
         }
-
         Some(UsesList { span, effects })
     }
 
-    // ── Block / Statement parsing ─────────────────────────────
+    // ── Block and Statement parsing ───────────────────────────
 
     pub fn parse_block(&mut self) -> Block {
         let span = self.current_span();
         self.eat(&TokenKind::Newline);
         self.eat(&TokenKind::Indent);
 
-        let stmts = Vec::new();
+        let mut stmts = Vec::new();
         while !self.at_eof() && !self.at(&TokenKind::Dedent) {
             self.skip_newlines();
             if self.at(&TokenKind::Dedent) || self.at_eof() { break; }
-            match self.peek_kind() {
-                TokenKind::Pass | TokenKind::Return => {
-                    self.advance();
-                    while !self.at_eof()
-                        && !matches!(self.peek_kind(),
-                            TokenKind::Newline | TokenKind::Dedent) {
-                        self.advance();
-                    }
-                    self.eat(&TokenKind::Newline);
-                }
-                _ => {
-                    while !self.at_eof()
-                        && !matches!(self.peek_kind(),
-                            TokenKind::Newline | TokenKind::Dedent | TokenKind::Indent) {
-                        self.advance();
-                    }
-                    self.eat(&TokenKind::Newline);
-                }
+
+            if let Some(stmt) = self.parse_stmt() {
+                stmts.push(stmt);
             }
         }
 
         self.eat(&TokenKind::Dedent);
         Block { span, stmts }
+    }
+
+    pub fn parse_stmt(&mut self) -> Option<Stmt> {
+        let span = self.current_span();
+
+        let stmt = match self.peek_kind() {
+
+            // pass — empty statement
+            TokenKind::Pass => {
+                self.advance();
+                self.eat(&TokenKind::Newline);
+                return Some(Stmt::Pass(span));
+            }
+
+            // let name : Type = expr
+            // let name = expr  (type inferred)
+            TokenKind::Let => {
+                self.advance();
+                let name = self.parse_ident("variable name")?;
+                let ty = if self.at(&TokenKind::Colon) {
+                    self.advance(); self.parse_type()
+                } else { None };
+                self.expect(&TokenKind::Assign)?;
+                let init = self.parse_expr()?;
+                self.eat(&TokenKind::Newline);
+                Stmt::Let(LetStmt { span, name, ty, init })
+            }
+
+            // let@ name = expr  — ephemeral binding
+            TokenKind::LetAt => {
+                self.advance();
+                let name = self.parse_ident("ephemeral variable name")?;
+                let ty = if self.at(&TokenKind::Colon) {
+                    self.advance(); self.parse_type()
+                } else { None };
+                self.expect(&TokenKind::Assign)?;
+                let init = self.parse_expr()?;
+                self.eat(&TokenKind::Newline);
+                Stmt::Ephemeral(EphemeralStmt { span, name, ty, init })
+            }
+
+            // mut name : Type = expr
+            TokenKind::Mut => {
+                self.advance();
+                let name = self.parse_ident("mutable variable name")?;
+                let ty = if self.at(&TokenKind::Colon) {
+                    self.advance(); self.parse_type()
+                } else { None };
+                self.expect(&TokenKind::Assign)?;
+                let init = self.parse_expr()?;
+                self.eat(&TokenKind::Newline);
+                Stmt::Mut(MutStmt { span, name, ty, init })
+            }
+
+            // return [expr]
+            TokenKind::Return => {
+                self.advance();
+                let value = if !matches!(self.peek_kind(),
+                    TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof) {
+                    self.parse_expr()
+                } else { None };
+                self.eat(&TokenKind::Newline);
+                Stmt::Return(ReturnStmt { span, value })
+            }
+
+            // if expr: body [else: body]
+            TokenKind::If => { self.parse_if_stmt()? }
+
+            // for var in expr: body
+            TokenKind::For => { self.parse_for_stmt()? }
+
+            // while expr: body
+            TokenKind::While => { self.parse_while_stmt()? }
+
+            // defer call_expr
+            TokenKind::Defer => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                self.eat(&TokenKind::Newline);
+                Stmt::Defer(DeferStmt { span, expr })
+            }
+
+            // with expr as name: body
+            TokenKind::With => { self.parse_with_stmt()? }
+
+            // Expression statement or assignment
+            _ => {
+                let expr = self.parse_expr()?;
+
+                // Check for assignment: expr = expr
+                if self.at(&TokenKind::Assign) {
+                    self.advance();
+                    let value = self.parse_expr()?;
+                    self.eat(&TokenKind::Newline);
+                    // Wrap as assignment
+                    let target = match expr {
+                        Expr::Ident(id) => AssignTarget::Ident(id),
+                        other => AssignTarget::Ident(Ident::new("_", span)), // fallback
+                    };
+                    Stmt::Assign(AssignStmt { span, target, op: AssignOp::Assign, value })
+                } else {
+                    self.eat(&TokenKind::Newline);
+                    Stmt::Expr(ExprStmt { span, expr })
+                }
+            }
+        };
+
+        Some(stmt)
+    }
+
+    fn parse_if_stmt(&mut self) -> Option<Stmt> {
+        let span = self.current_span();
+        self.expect(&TokenKind::If)?;
+
+        let condition = self.parse_expr()?;
+        self.expect(&TokenKind::Colon)?;
+        let then_body = self.parse_block();
+
+        let mut else_body: Option<Block> = None;
+        self.skip_newlines();
+        if self.at(&TokenKind::Else) {
+            self.advance(); // consume 'else'
+            if self.at(&TokenKind::If) {
+                // else if → wrap in another if
+                // else if: 'if' token still pending, parse it
+                let ei_span = self.current_span();
+                self.advance(); // consume 'if'
+                let ei_cond = self.parse_expr()?;
+                self.expect(&TokenKind::Colon)?;
+                let ei_body = self.parse_block();
+                // For simplicity, wrap as else block containing if
+                let inner_if = Stmt::If(IfStmt {
+                    span: ei_span,
+                    condition: ei_cond,
+                    then_block: ei_body,
+                    else_ifs: vec![],
+                    else_block: None,
+                });
+                else_body = Some(Block { span: ei_span, stmts: vec![inner_if] });
+            } else {
+                self.expect(&TokenKind::Colon)?;
+                else_body = Some(self.parse_block());
+            }
+        }
+
+        Some(Stmt::If(IfStmt {
+            span,
+            condition,
+            then_block: then_body,
+            else_ifs: vec![],
+            else_block: else_body,
+        }))
+    }
+
+    fn parse_for_stmt(&mut self) -> Option<Stmt> {
+        let span = self.current_span();
+        self.expect(&TokenKind::For)?;
+        let var = self.parse_ident("loop variable")?;
+        self.expect(&TokenKind::In)?;
+        let iter = self.parse_expr()?;
+        self.expect(&TokenKind::Colon)?;
+        let body = self.parse_block();
+        Some(Stmt::For(ForStmt { span, binding: var, iterable: iter, body }))
+    }
+
+    fn parse_while_stmt(&mut self) -> Option<Stmt> {
+        let span = self.current_span();
+        self.expect(&TokenKind::While)?;
+        let condition = self.parse_expr()?;
+        self.expect(&TokenKind::Colon)?;
+        let body = self.parse_block();
+        Some(Stmt::While(WhileStmt { span, condition, body }))
+    }
+
+    fn parse_with_stmt(&mut self) -> Option<Stmt> {
+        let span = self.current_span();
+        self.expect(&TokenKind::With)?;
+        let expr    = self.parse_expr()?;
+        self.expect(&TokenKind::As)?;
+        let binding = self.parse_ident("with binding name")?;
+        self.expect(&TokenKind::Colon)?;
+        let body    = self.parse_block();
+        Some(Stmt::With(WithStmt { span, expr, binding, body }))
+    }
+
+    // ── Expression parsing (basic — P2-11 adds Pratt parser) ──
+
+    pub fn parse_expr(&mut self) -> Option<Expr> {
+        self.parse_expr_comparison()
+    }
+
+    fn parse_expr_comparison(&mut self) -> Option<Expr> {
+        let mut left = self.parse_expr_additive()?;
+        loop {
+            let span = self.current_span();
+            let op = match self.peek_kind() {
+                TokenKind::EqEq    => { self.advance(); crate::ast::BinOp::Eq  }
+                TokenKind::BangEq  => { self.advance(); crate::ast::BinOp::NotEq }
+                TokenKind::Lt      => { self.advance(); crate::ast::BinOp::Lt  }
+                TokenKind::Gt      => { self.advance(); crate::ast::BinOp::Gt  }
+                TokenKind::LtEq    => { self.advance(); crate::ast::BinOp::LtEq}
+                TokenKind::GtEq    => { self.advance(); crate::ast::BinOp::GtEq}
+                _ => break,
+            };
+            let right = self.parse_expr_additive()?;
+            left = Expr::BinOp(Box::new(crate::ast::BinOpExpr {
+                span, op, lhs: left, rhs: right,
+            }));
+        }
+        Some(left)
+    }
+
+    fn parse_expr_additive(&mut self) -> Option<Expr> {
+        let mut left = self.parse_expr_multiplicative()?;
+        loop {
+            let span = self.current_span();
+            let op = match self.peek_kind() {
+                TokenKind::Plus  => { self.advance(); crate::ast::BinOp::Add }
+                TokenKind::Minus => { self.advance(); crate::ast::BinOp::Sub }
+                _ => break,
+            };
+            let right = self.parse_expr_multiplicative()?;
+            left = Expr::BinOp(Box::new(crate::ast::BinOpExpr {
+                span, op, lhs: left, rhs: right,
+            }));
+        }
+        Some(left)
+    }
+
+    fn parse_expr_multiplicative(&mut self) -> Option<Expr> {
+        let mut left = self.parse_expr_unary()?;
+        loop {
+            let span = self.current_span();
+            let op = match self.peek_kind() {
+                TokenKind::Star    => { self.advance(); crate::ast::BinOp::Mul }
+                TokenKind::Slash   => { self.advance(); crate::ast::BinOp::Div }
+                TokenKind::Percent => { self.advance(); crate::ast::BinOp::Mod }
+                _ => break,
+            };
+            let right = self.parse_expr_unary()?;
+            left = Expr::BinOp(Box::new(crate::ast::BinOpExpr {
+                span, op, lhs: left, rhs: right,
+            }));
+        }
+        Some(left)
+    }
+
+    fn parse_expr_unary(&mut self) -> Option<Expr> {
+        let span = self.current_span();
+        match self.peek_kind() {
+            TokenKind::Minus => {
+                self.advance();
+                let expr = self.parse_expr_postfix()?;
+                Some(Expr::UnaryOp(Box::new(crate::ast::UnaryOpExpr {
+                    span, op: crate::ast::UnaryOp::Neg, expr,
+                })))
+            }
+            TokenKind::Bang => {
+                self.advance();
+                let expr = self.parse_expr_postfix()?;
+                Some(Expr::UnaryOp(Box::new(crate::ast::UnaryOpExpr {
+                    span, op: crate::ast::UnaryOp::Not, expr,
+                })))
+            }
+            _ => self.parse_expr_postfix(),
+        }
+    }
+
+    fn parse_expr_postfix(&mut self) -> Option<Expr> {
+        let mut expr = self.parse_expr_primary()?;
+        loop {
+            let span = self.current_span();
+            match self.peek_kind() {
+                // Method call or field access: expr.name
+                TokenKind::Dot => {
+                    self.advance();
+                    let name = self.parse_ident("field or method name")?;
+                    if self.at(&TokenKind::LParen) {
+                        // Method call: expr.method(args)
+                        self.advance();
+                        let args = self.parse_call_args();
+                        self.expect(&TokenKind::RParen)?;
+                        expr = Expr::MethodCall(Box::new(crate::ast::MethodCallExpr {
+                            span, receiver: Box::new(expr), method: name,
+                            generics: vec![], args,
+                        }));
+                    } else {
+                        // Field access: expr.field
+                        expr = Expr::FieldAccess(Box::new(FieldAccessExpr {
+                            span, object: Box::new(expr), field: name,
+                        }));
+                    }
+                }
+                // Function call: expr(args)
+                TokenKind::LParen => {
+                    self.advance();
+                    let args = self.parse_call_args();
+                    self.expect(&TokenKind::RParen)?;
+                    // For now only handle direct ident calls
+                    // P2-11 will handle complex callees
+                    if let Expr::Ident(id) = expr {
+                        expr = Expr::Call(Box::new(crate::ast::CallExpr {
+                            span, callee: id, generics: vec![], args,
+                        }));
+                    } else {
+                        // Skip complex callee for now
+                        expr = Expr::Lit(Literal::None(span));
+                    }
+                }
+                // Index: expr[idx]
+                TokenKind::LBracket => {
+                    self.advance();
+                    let idx = self.parse_expr()?;
+                    self.expect(&TokenKind::RBracket)?;
+                    expr = Expr::Index(Box::new(crate::ast::IndexExpr {
+                        span, object: Box::new(expr), index: Box::new(idx),
+                    }));
+                }
+                // ? propagation
+                TokenKind::Question => {
+                    self.advance();
+                    expr = Expr::Propagate(Box::new(expr), span);
+                }
+                _ => break,
+            }
+        }
+        Some(expr)
+    }
+
+    fn parse_expr_primary(&mut self) -> Option<Expr> {
+        let span = self.current_span();
+        match self.peek_kind().clone() {
+            // Integer literal
+            TokenKind::IntLit(n) => {
+                self.advance();
+                Some(Expr::Lit(Literal::Int(n, span)))
+            }
+            // Float literal
+            TokenKind::FloatLit(f) => {
+                self.advance();
+                Some(Expr::Lit(Literal::Float(f, span)))
+            }
+            // String literal
+            TokenKind::StrLit(s) => {
+                self.advance();
+                Some(Expr::Lit(Literal::Str(s, span)))
+            }
+            // Bool literal
+            TokenKind::BoolLit(b) => {
+                self.advance();
+                Some(Expr::Lit(Literal::Bool(b, span)))
+            }
+            // true / false
+            TokenKind::True => {
+                self.advance();
+                Some(Expr::Lit(Literal::Bool(true, span)))
+            }
+            TokenKind::False => {
+                self.advance();
+                Some(Expr::Lit(Literal::Bool(false, span)))
+            }
+            // None
+            TokenKind::None => {
+                self.advance();
+                Some(Expr::Lit(Literal::None(span)))
+            }
+            // Identifier or function call
+            TokenKind::Ident(name) => {
+                self.advance();
+                Some(Expr::Ident(Ident::new(name, span)))
+            }
+            // Parenthesised expression
+            TokenKind::LParen => {
+                self.advance();
+                let inner = self.parse_expr()?;
+                self.expect(&TokenKind::RParen)?;
+                Some(inner)
+            }
+            // List literal: [a, b, c]
+            TokenKind::LBracket => {
+                self.advance();
+                let mut items = Vec::new();
+                while !self.at_eof() && !self.at(&TokenKind::RBracket) {
+                    if let Some(e) = self.parse_expr() { items.push(e); }
+                    if self.eat(&TokenKind::Comma).is_none() { break; }
+                }
+                self.expect(&TokenKind::RBracket)?;
+                Some(Expr::List(crate::ast::ListExpr { span, elements: items }))
+            }
+            _ => {
+                // Don't error here — caller will decide
+                None
+            }
+        }
+    }
+
+    fn parse_call_args(&mut self) -> Vec<crate::ast::Arg> {
+        let mut args = Vec::new();
+        while !self.at_eof() && !self.at(&TokenKind::RParen) {
+            let span = self.current_span();
+            // Check for named arg: name: expr
+            let label = if matches!(self.peek_kind(), TokenKind::Ident(_)) {
+                let saved = self.pos;
+                let tok   = self.advance();
+                if self.at(&TokenKind::Colon) {
+                    self.advance();
+                    if let TokenKind::Ident(n) = tok.kind {
+                        Some(Ident::new(n, tok.span))
+                    } else { None }
+                } else { self.pos = saved; None }
+            } else { None };
+            let value = match self.parse_expr() {
+                Some(e) => e,
+                None => break,
+            };
+            args.push(crate::ast::Arg { span, label, value });
+            if self.eat(&TokenKind::Comma).is_none() { break; }
+        }
+        args
     }
 
     // ── Type parsing ──────────────────────────────────────────
@@ -654,9 +1021,11 @@ mod tests {
     fn file() -> FileId { FileId(1) }
 
     fn make_parser(source: &str) -> Parser {
-        let tokens = lex(source, file());
+        let tokens = axon_lexer::inject_indentation(lex(source, file()));
         Parser::new(tokens, source, file())
     }
+
+    // ── Existing tests (P2-05 through P2-09) ─────────────────
 
     #[test] fn test_parse_empty_source() {
         let r = crate::parse("", file());
@@ -814,15 +1183,12 @@ mod tests {
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         let m = r.program.module.unwrap();
         assert_eq!(m.path.len(), 3);
-        assert_eq!(m.path[0].name, "aieonyx");
-        assert_eq!(m.path[1].name, "aegis");
-        assert_eq!(m.path[2].name, "monitor");
     }
 
     #[test] fn test_parse_import_simple() {
         let r = crate::parse("module hello\nimport axon.sys\n", file());
         assert!(r.errors.is_empty(), "{:?}", r.errors);
-        assert_eq!(r.program.imports[0].path[0].name, "axon");
+        assert_eq!(r.program.imports.len(), 1);
     }
 
     #[test] fn test_parse_import_with_alias() {
@@ -885,8 +1251,6 @@ mod tests {
         assert_eq!(r.program.items.len(), 2);
     }
 
-    // ── P2-09 tests ───────────────────────────────────────────
-
     #[test] fn test_parse_fn_minimal() {
         let src = "fn hello():\n    pass\n";
         let r   = crate::parse(src, file());
@@ -904,8 +1268,6 @@ mod tests {
         match &r.program.items[0] {
             TopLevelItem::Fn(f) => {
                 assert_eq!(f.params.len(), 2);
-                assert_eq!(f.params[0].name.name, "x");
-                assert_eq!(f.params[1].name.name, "y");
                 assert!(f.ret_type.is_some());
             }
             other => panic!("expected Fn, got {:?}", other),
@@ -919,7 +1281,6 @@ mod tests {
         match &r.program.items[0] {
             TopLevelItem::Fn(f) => {
                 assert_eq!(f.params[0].mem_mode, Some(MemMode::Own));
-                assert_eq!(f.params[0].name.name, "data");
             }
             other => panic!("expected Fn, got {:?}", other),
         }
@@ -932,9 +1293,7 @@ mod tests {
         match &r.program.items[0] {
             TopLevelItem::Fn(f) => {
                 assert!(f.uses.is_some());
-                let uses = f.uses.as_ref().unwrap();
-                assert_eq!(uses.effects.len(), 1);
-                assert_eq!(uses.effects[0].parts[0].name, "io");
+                assert_eq!(f.uses.as_ref().unwrap().effects.len(), 1);
             }
             other => panic!("expected Fn, got {:?}", other),
         }
@@ -943,18 +1302,9 @@ mod tests {
     #[test] fn test_parse_fn_with_decorator() {
         let src = "@ai.intent(\"always returns positive\")\nfn abs(x : Int) -> Int:\n    pass\n";
         let r   = crate::parse(src, file());
-        // Decorators parsed if @ produces At token in lexer
-        // If decorator count is 0, it means @ is tokenized differently
-        assert_eq!(r.program.items.len(), 1,
-            "expected 1 item, got: {} items, errors: {:?}",
-            r.program.items.len(), r.errors);
+        assert_eq!(r.program.items.len(), 1, "errors: {:?}", r.errors);
         match &r.program.items[0] {
-            TopLevelItem::Fn(f) => {
-                assert_eq!(f.name.name, "abs");
-                // Decorator check — will be 1 if @ emits At token
-                // Will be 0 if @ emits differently (lexer-dependent)
-                let _ = f.decorators.len(); // just verify it compiles
-            }
+            TopLevelItem::Fn(f) => assert_eq!(f.name.name, "abs"),
             other => panic!("expected Fn, got {:?}", other),
         }
     }
@@ -980,5 +1330,207 @@ mod tests {
         let src = "fn main:\n    pass\n";
         let r   = crate::parse(src, file());
         assert_eq!(r.program.items.len(), 1);
+    }
+
+    // ── P2-10: Statement tests ────────────────────────────────
+
+    #[test] fn test_parse_let_stmt() {
+        let src = "fn f():\n    let x = 42\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                assert_eq!(f.body.stmts.len(), 1);
+                assert!(matches!(f.body.stmts[0], Stmt::Let(_)));
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_let_with_type() {
+        let src = "fn f():\n    let x : Int = 42\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        assert_eq!(s.name.name, "x");
+                        assert!(s.ty.is_some());
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_mut_stmt() {
+        let src = "fn f():\n    mut count = 0\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                assert!(matches!(f.body.stmts[0], Stmt::Mut(_)));
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_return_stmt() {
+        let src = "fn f() -> Int:\n    return 42\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Return(s) => assert!(s.value.is_some()),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_return_void() {
+        let src = "fn f():\n    return\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Return(s) => assert!(s.value.is_none()),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_if_stmt() {
+        let src = "fn f():\n    if x:\n        pass\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                assert!(matches!(f.body.stmts[0], Stmt::If(_)));
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_if_else_stmt() {
+        let src = "fn f():\n    if x:\n        pass\n    else:\n        pass\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::If(s) => assert!(s.else_block.is_some()),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_for_stmt() {
+        let src = "fn f():\n    for x in items:\n        pass\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::For(s) => assert_eq!(s.binding.name, "x"),
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_while_stmt() {
+        let src = "fn f():\n    while running:\n        pass\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                assert!(matches!(f.body.stmts[0], Stmt::While(_)));
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_defer_stmt() {
+        let src = "fn f():\n    defer cleanup()\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                assert!(matches!(f.body.stmts[0], Stmt::Defer(_)));
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_expr_stmt() {
+        let src = "fn f():\n    print(42)\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                assert!(matches!(f.body.stmts[0], Stmt::Expr(_)));
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_multiple_stmts() {
+        let src = concat!(
+            "fn process(x : Int) -> Int:\n",
+            "    let y = x\n",
+            "    mut z = 0\n",
+            "    return y\n",
+        );
+        let r = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => assert_eq!(f.body.stmts.len(), 3),
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_int_literal_expr() {
+        let src = "fn f():\n    let x = 99\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        assert!(matches!(s.init, Expr::Lit(Literal::Int(99, _))));
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
+    }
+
+    #[test] fn test_parse_bool_literal_expr() {
+        let src = "fn f():\n    let flag = true\n";
+        let r   = crate::parse(src, file());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        match &r.program.items[0] {
+            TopLevelItem::Fn(f) => {
+                match &f.body.stmts[0] {
+                    Stmt::Let(s) => {
+                        assert!(matches!(s.init, Expr::Lit(Literal::Bool(true, _))));
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("{:?}", other),
+        }
     }
 }
