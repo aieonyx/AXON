@@ -1,0 +1,25 @@
+# P5-03 Test — @ai.intent annotations for axon suggest
+# Run: axon suggest ~/axon/axon_ai/tests/p503_suggest.axon
+
+module axon.ai.tests.p503
+
+@ai.intent("always returns a non-negative value")
+fn abs_value(x : Int) -> Int:
+    if x < 0:
+        return 0 - x
+    return x
+
+@ai.intent("pure function, no side effects, always returns positive")
+fn square(x : Int) -> Int:
+    return x * x
+
+@ai.intent("does not allocate heap memory, only reads input")
+fn classify(severity : Int) -> Int:
+    match severity:
+        0 => return 0
+        1 => return 1
+        _ => return 2
+
+@ai.intent("always logs to audit trail, read-only on system state")
+task monitor_signal(signal : Int) -> Int:
+    return signal
