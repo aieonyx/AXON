@@ -382,6 +382,39 @@ impl ConstraintVerifier {
                     }
                 }
             }
+            Constraint::ResultAtMost(n) => {
+                for (i, rv) in return_values.iter().enumerate() {
+                    match rv {
+                        AbstractValue::Const(v)      if *v <= *n  => {}
+                        AbstractValue::Range(_, hi)   if *hi <= *n => {}
+                        AbstractValue::Bottom                      => {}
+                        AbstractValue::Const(_) | AbstractValue::Range(_, _) =>
+                            return ConstraintCheckResult::Violated(ConstraintViolation {
+                                constraint    : constraint.description(),
+                                function_name : fn_name.to_string(),
+                                violating_path: format!("return path #{}", i + 1),
+                                suggestion    : format!("ensure all returns satisfy result <= {}", n),
+                            }),
+                        _ => { all_proven = false; }
+                    }
+                }
+            }
+            Constraint::ResultEquals(n) => {
+                for (i, rv) in return_values.iter().enumerate() {
+                    match rv {
+                        AbstractValue::Const(v) if *v == *n => {}
+                        AbstractValue::Bottom               => {}
+                        AbstractValue::Const(_)             =>
+                            return ConstraintCheckResult::Violated(ConstraintViolation {
+                                constraint    : constraint.description(),
+                                function_name : fn_name.to_string(),
+                                violating_path: format!("return path #{}", i + 1),
+                                suggestion    : format!("function must always return exactly {}", n),
+                            }),
+                        _ => { all_proven = false; }
+                    }
+                }
+            }
             // Other constraints — Unknown for now, expanded in P5-04
             _ => { all_proven = false; }
         }

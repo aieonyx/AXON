@@ -21,6 +21,7 @@ fn main() {
         "version" => cmd_version(),
         "check"   => cmd_check(&args),
         "verify"  => cmd_verify(&args),
+        "suggest" => cmd_suggest(&args),
         "build"   => cmd_build(&args),
         "run"     => cmd_run(&args),
         other => {
@@ -39,8 +40,7 @@ fn print_usage() {
     println!();
     println!("Commands:");
     println!("  version                         Print AXON version");
-    println!("  check  <file>                   Parse and verify AXON source
-  verify <file>                   Formal @ensures/@requires verification");
+    println!("  check  <file>                   Parse and verify AXON source");
     println!("  build  <file>                   Transpile AXON → Rust (Phase 3)");
     println!("  build  --native <file>          Compile AXON → native binary (Phase 4)");
     println!("  build  --native --target <t> <file>  Cross-compile (arm64, aarch64-sel4)");
@@ -55,6 +55,134 @@ fn cmd_version() {
     println!("Runtime:   axon_rt + axon_std (P3-05)");
     println!("Backend:   planned (LLVM, Phase 4)");
     println!("AI engine: planned (Phase 5)");
+}
+
+fn scan_ai_intents(source: &str) -> Vec<(String, String)> {
+    let mut results        = Vec::new();
+    let mut pending_intent : Option<String> = None;
+
+    for line in source.lines() {
+        let t = line.trim();
+
+        // Look for @ai.intent("...") pattern
+        if let Some(pos) = t.find("@ai.intent(") {
+            let rest = &t[pos + 11..];  // after "@ai.intent("
+            if let Some(q1) = rest.find('"') {
+                let after_q1 = &rest[q1 + 1..];
+                if let Some(q2) = after_q1.find('"') {
+                    pending_intent = Some(after_q1[..q2].to_string());
+                }
+            }
+            continue;
+        }
+
+        if let Some(ref intent) = pending_intent {
+            let is_fn   = t.starts_with("fn ")   || t.starts_with("pub fn ");
+            let is_task = t.starts_with("task ") || t.starts_with("pub task ");
+            if is_fn || is_task {
+                let prefix = if is_fn { "fn " } else { "task " };
+                let fn_name = t
+                    .trim_start_matches("pub ")
+                    .trim_start_matches(prefix)
+                    .split('(')
+                    .next()
+                    .unwrap_or("?")
+                    .trim()
+                    .to_string();
+                results.push((fn_name, intent.clone()));
+                pending_intent = None;
+                continue;
+            }
+        }
+
+        // Blank lines, comments, decorators don't reset the search
+        if t.is_empty() || t.starts_with('#') || t.starts_with('@') { continue; }
+
+        // Any other line resets
+        if pending_intent.is_some() { pending_intent = None; }
+    }
+    results
+}
+
+fn cmd_suggest(args: &[String]) {
+    // ── axon suggest <file.axon> ─────────────────────────────
+    // Finds @ai.intent annotations and asks the AI to propose
+    // @ensures/@effect formal specs. Advisory — never modifies files.
+    if args.len() < 3 {
+        eprintln!("Usage: axon suggest <file.axon>");
+        std::process::exit(1);
+    }
+    let file   = &args[2];
+    let source = read_file(file);
+
+    println!("axon suggest: {}", file);
+    println!("Scanning for @ai.intent annotations...\n");
+
+    let intents = scan_ai_intents(&source);
+
+    if intents.is_empty() {
+        println!("  No @ai.intent annotations found.");
+        println!("  Add @ai.intent(\"description\") above functions to get suggestions.");
+        println!("\nExample:");
+        println!("  @ai.intent(\"always returns non-negative\")");
+        println!("  fn abs(x : Int) -> Int:");
+        println!("      ...");
+        return;
+    }
+
+    let mut translator = axon_ai::IntentTranslator::new();
+    let mut any_proposed = false;
+
+    for (fn_name, intent_nl) in &intents {
+        println!("── fn {} ──────────────────────────────", fn_name);
+        println!("  @ai.intent: \"{}\"", intent_nl);
+
+        match translator.translate(intent_nl) {
+            Ok(spec) => {
+                println!("  AI confidence: {:.0}%\n", spec.ai_confidence * 100.0);
+
+                let has_ensures = !spec.ensures.is_empty();
+                let has_effects = !spec.effects.is_empty();
+
+                if has_ensures || has_effects {
+                    println!("  Proposed annotations (add above fn {}):", fn_name);
+                    for c in &spec.ensures {
+                        println!("    @ensures(\"{}\")  ← postcondition", c.description());
+                    }
+                    for e in &spec.effects {
+                        println!("    @effect(\"{}\")   ← side-effect declaration", e.description());
+                    }
+                    any_proposed = true;
+                } else {
+                    println!("  No formal constraints proposed.");
+                    println!("  Consider clarifying the intent with specific numeric bounds.");
+                }
+            }
+            Err(e) => {
+                println!("  AI error: {}\n", e);
+                // Run rule-based fallback manually
+                let spec = translator.rule_based_fallback(intent_nl);
+                if !spec.ensures.is_empty() || !spec.effects.is_empty() {
+                    println!("  Rule-based fallback:");
+                    for c in &spec.ensures {
+                        println!("    @ensures(\"{}\")  [rule-based]", c.description());
+                    }
+                    for e in &spec.effects {
+                        println!("    @effect(\"{}\")   [rule-based]", e.description());
+                    }
+                    any_proposed = true;
+                }
+            }
+        }
+        println!();
+    }
+
+    if any_proposed {
+        println!("Next steps:");
+        println!("  1. Add the proposed @ensures annotations to your source file");
+        println!("  2. Run: axon verify {}", file);
+        println!("  3. Fix any violations the verifier finds");
+    }
 }
 
 fn cmd_verify(args: &[String]) {

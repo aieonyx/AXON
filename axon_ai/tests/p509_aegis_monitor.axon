@@ -1,0 +1,55 @@
+# ============================================================
+# AXON — Aegis Monitor — Phase 5 Integration Test
+# Copyright © 2026 Edison Lepiten — AIEONYX
+#
+# This file demonstrates the full Phase 5 pipeline:
+#
+#   axon suggest p509_aegis_monitor.axon  → AI proposes @ensures
+#   axon verify  p509_aegis_monitor.axon  → compiler verifies them
+#   axon build --native p509_aegis_monitor.axon → native ARM64 binary
+#
+# The first compiler in the world to verify declared intent at compile time.
+# ============================================================
+
+module aieonyx.aegis.monitor
+
+import axon.sys.sel4.ipc as ipc
+import axon.mesh.collective as collective
+
+# ── Threat classification ─────────────────────────────────────
+#
+# Threat levels:
+#   0 = Clear      (no threat detected)
+#   1 = Advisory   (potential concern, log and monitor)
+#   2 = Critical   (active threat, escalate immediately)
+
+@ai.intent("classifies a threat signal — always returns a valid threat level between 0 and 2 inclusive")
+@ensures("result >= 0")
+@ensures("result <= 2")
+fn classify(severity : Int) -> Int:
+    match severity:
+        0 => return 0
+        1 => return 1
+        _ => return 2
+
+# ── Audit priority mapping ────────────────────────────────────
+
+@ai.intent("maps a threat level to an audit priority — always returns a positive value")
+@ensures("result >= 1")
+fn audit_priority(level : Int) -> Int:
+    match level:
+        0 => return 1
+        1 => return 2
+        _ => return 3
+
+# ── Signal monitor task ───────────────────────────────────────
+
+@ai.intent("monitors seL4 IPC signals continuously — read-only on system state, always emits to collective")
+@effect("readonly")
+@effect("writes_audit_log")
+task monitor() uses [ipc.read, collective.emit]:
+    let channel = ipc.open_channel()?
+    defer channel.close()
+    for signal in channel.signals:
+        let level = classify(signal)
+        collective.emit(level)
