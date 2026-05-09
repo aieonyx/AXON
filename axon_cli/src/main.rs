@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use axon_lexer::FileId;
+use axon_ai;
 use axon_llvm;
 
 fn main() {
@@ -19,6 +20,7 @@ fn main() {
     match args[1].as_str() {
         "version" => cmd_version(),
         "check"   => cmd_check(&args),
+        "verify"  => cmd_verify(&args),
         "build"   => cmd_build(&args),
         "run"     => cmd_run(&args),
         other => {
@@ -37,7 +39,8 @@ fn print_usage() {
     println!();
     println!("Commands:");
     println!("  version                         Print AXON version");
-    println!("  check  <file>                   Parse and verify AXON source");
+    println!("  check  <file>                   Parse and verify AXON source
+  verify <file>                   Formal @ensures/@requires verification");
     println!("  build  <file>                   Transpile AXON → Rust (Phase 3)");
     println!("  build  --native <file>          Compile AXON → native binary (Phase 4)");
     println!("  build  --native --target <t> <file>  Cross-compile (arm64, aarch64-sel4)");
@@ -52,6 +55,68 @@ fn cmd_version() {
     println!("Runtime:   axon_rt + axon_std (P3-05)");
     println!("Backend:   planned (LLVM, Phase 4)");
     println!("AI engine: planned (Phase 5)");
+}
+
+fn cmd_verify(args: &[String]) {
+    // ── axon verify <file.axon> ──────────────────────────────
+    // Runs formal verification on @ensures, @requires, @effect annotations.
+    // Separate from axon check (syntax) — this is semantic verification.
+    if args.len() < 3 {
+        eprintln!("Usage: axon verify <file.axon>");
+        std::process::exit(1);
+    }
+    let file   = &args[2];
+    let source = read_file(file);
+
+    println!("axon verify: {}", file);
+
+    let results = axon_ai::verify_source(&source);
+
+    if results.is_empty() {
+        println!("  No @ensures/@requires annotations found.");
+        println!("axon verify: {} — nothing to verify", file);
+        return;
+    }
+
+    let mut violation_count = 0;
+    let mut verified_count  = 0;
+    let mut unknown_count   = 0;
+
+    for result in &results {
+        match result.status {
+            axon_ai::VerificationStatus::Violated => {
+                violation_count += 1;
+                for v in &result.violations {
+                    eprintln!("
+error[E411]: @ensures constraint violated");
+                    eprintln!("  → fn {} declares: {}", v.function_name, v.constraint);
+                    eprintln!("  → violating path: {}", v.violating_path);
+                    eprintln!("  → hint: {}", v.suggestion);
+                }
+            }
+            axon_ai::VerificationStatus::Verified => {
+                verified_count += 1;
+                println!("  ✓ fn {} — @ensures verified on all paths", result.function_name);
+            }
+            axon_ai::VerificationStatus::Unknown => {
+                unknown_count += 1;
+                println!("  ? fn {} — unknown (cannot fully prove on all paths)", result.function_name);
+                for w in &result.warnings {
+                    println!("    {}", w);
+                }
+            }
+            axon_ai::VerificationStatus::NotVerifiable => {}
+        }
+    }
+
+    println!();
+    if violation_count > 0 {
+        eprintln!("axon verify: {} — {} violation(s) found", file, violation_count);
+        std::process::exit(1);
+    } else {
+        println!("axon verify: {} — OK ({} verified, {} unknown)",
+            file, verified_count, unknown_count);
+    }
 }
 
 fn cmd_check(args: &[String]) {
