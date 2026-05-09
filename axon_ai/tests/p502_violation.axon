@@ -1,0 +1,5 @@
+module axon.ai.tests.p502
+
+@ensures("result >= 0")
+fn bad_abs(x : Int) -> Int:
+    return 0 - 1

@@ -1,0 +1,17 @@
+module axon.ai.tests.p502
+
+@ensures("result >= 0")
+fn absolute_value(x : Int) -> Int:
+    if x < 0:
+        return 0 - x
+    return x
+
+@ensures("result >= 0")
+fn clamp_low(x : Int) -> Int:
+    if x < 0:
+        return 0
+    return x
+
+@ensures("result >= 1")
+fn always_positive() -> Int:
+    return 42
