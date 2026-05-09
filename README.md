@@ -55,3 +55,6 @@ Edison Lepiten — Founder & Project Director, AIEONYX
 If AXON is useful or interesting to you, consider supporting its development:
 
 [![Support on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/aieonyx)
+
+#rust, #programming-language, #sel4, #llvm, #formal-verification, #systems-programming, #compiler, #ai, #sovereign
+
