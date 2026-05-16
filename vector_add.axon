@@ -1,0 +1,7 @@
+module aieonyx.gpu.vector_add
+
+fn add(a: Float, b: Float) -> Float:
+    return a + b
+
+fn vector_add(x: Int, y: Int) -> Int:
+    return x + y

@@ -288,7 +288,7 @@ impl LlvmCodegen {
                 let ty_str     = lty.as_str();
 
                 let instr = match &b.op {
-                    BinOp::Add  => format!("{} = add {} {}, {}",    result, ty_str, lhs, rhs),
+                    BinOp::Add  => format!("{} = {} {} {}, {}", result, if lty == LlvmType::F64 { "fadd" } else { "add" }, ty_str, lhs, rhs),
                     BinOp::Sub  => format!("{} = sub {} {}, {}",    result, ty_str, lhs, rhs),
                     BinOp::Mul  => format!("{} = mul {} {}, {}",    result, ty_str, lhs, rhs),
                     BinOp::Div  => format!("{} = sdiv {} {}, {}",   result, ty_str, lhs, rhs),
