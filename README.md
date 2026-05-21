@@ -61,7 +61,7 @@ Rust · LLVM 18 · seL4 · Ollama · ARM64
 
 ## License
 
-MIT · Copyright © 2026 Edison Lepiten - AIEONYX. All rights reserved.
+Apache 2.0 · Copyright © 2026 Edison Lepiten - AIEONYX. All rights reserved.
 
 ## Author
 Edison Lepiten — Founder & Project Director, AIEONYX
