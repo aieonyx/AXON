@@ -4,7 +4,7 @@
 <h1 align="center">AXON</h1>
 
 <p align="center">
-The First AI-Native Systems Compiler
+THE FIRST AI-NATIVE SYSTEMS PROGRAMMING LANGUAGE
 </p>
 
 <p align="center">
@@ -22,13 +22,15 @@ Intent → Verification → Native Execution
 
 </p>
 
-# AXON — AI-Native Programming Language
-
-**The first AI-native sovereign systems programming language designed with AI as a 
-first-class compiler citizen.**
-
+<p align="center">
+The first AI-native sovereign systems programming language designed with AI as a 
+first-class compiler citizen.
+  
+<p align="center">
 Write intent in plain English. The compiler verifies it at compile time.
 Deploy to seL4 bare-metal.
+</p>
+<p align="center">
 
 ```
 @ai.intent("always returns a valid threat level between 0 and 2")
