@@ -80,6 +80,13 @@ classify()           100M calls    525ms            190 M/s
 Machine code: AXON 26 bytes, Rust 20 bytes
 
 Verdict: Equivalent quality. Different strategy.
+
+
+<p align="center">
+  <img src="./assets/nvidiaFbook.jpg" alt="AXON Banner" width="100%">
+</p>
+
+
 ##
 ## Built with
 
