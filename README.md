@@ -1,3 +1,27 @@
+<p align="center">
+  <img src="./assets/axon-banner.png" alt="AXON Banner" width="100%">
+</p>
+<h1 align="center">AXON</h1>
+
+<p align="center">
+The First AI-Native Systems Compiler
+</p>
+
+<p align="center">
+Intent → Verification → Native Execution
+</p>
+<p align="center">
+
+<img src="https://img.shields.io/badge/status-active-success">
+
+<img src="https://img.shields.io/badge/language-Rust-orange">
+
+<img src="https://img.shields.io/badge/backend-LLVM18-blue">
+
+<img src="https://img.shields.io/badge/license-MIT-green">
+
+</p>
+
 # AXON — AI-Native Programming Language
 
 **The first AI-native sovereign systems programming language designed with AI as a 
