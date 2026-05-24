@@ -380,14 +380,46 @@ fn cmd_run(args: &[String]) {
 fn build_project(axon_path: &Path) -> PathBuf {
     let source = read_file(&axon_path.to_string_lossy());
 
-    // Step 1: Transpile to Rust
-    let rust_source = match axon_codegen::codegen(&source) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("axon: transpile failed:\n{}", e);
-            std::process::exit(1);
+    // Step 1: Transpile to Rust + collect APR (5.5-03)
+    let file_id = axon_lexer::FileId(1);
+    let parse_result = axon_parser::parse(&source, file_id);
+    if !parse_result.errors.is_empty() {
+        for e in &parse_result.errors {
+            eprintln!("axon: parse error: {:?}", e);
         }
+        std::process::exit(1);
+    }
+    // 5.5-04: parallel codegen toggle
+    let (rust_source, apr) = if std::env::var("AXON_PARALLEL")
+        .unwrap_or_default() == "1" {
+        println!("axon: parallel codegen active");
+        match axon_codegen::codegen_parallel(&source) {
+            Ok(s) => {
+                let mut g = axon_codegen::CodeGen::new();
+                g.emit_program(&parse_result.program);
+                let a = std::mem::take(&mut g.apr);
+                let _ = g.finish();
+                (s, a)
+            }
+            Err(e) => {
+                eprintln!("axon: parallel codegen failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let mut gen = axon_codegen::CodeGen::new();
+        gen.emit_program(&parse_result.program);
+        let apr = std::mem::take(&mut gen.apr);
+        let rust_source = gen.finish();
+        (rust_source, apr)
     };
+    println!("axon: {}", apr.summary());
+    for w in apr.warnings() {
+        eprintln!("{}", w);
+    }
+    if apr.has_dropped() {
+        std::process::exit(1);
+    }
 
     // Step 2: Create project directory
     let stem = axon_path.file_stem()

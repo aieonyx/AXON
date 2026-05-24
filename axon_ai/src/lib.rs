@@ -359,3 +359,229 @@ mod tests {
     }
 }
 
+
+// ── Phase 5.5-05: Security-Weighted AI Inference (SWI) ───────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SecurityTier {
+    Tier1, // security-critical — full inference
+    Tier2, // annotated — standard inference
+    Tier3, // low-value — skip inference
+}
+
+/// Classify a function into a security tier.
+pub fn classify_tier(fn_name: &str, has_annotations: bool) -> SecurityTier {
+    const SECURITY_KEYWORDS: &[&str] = &[
+        "classify", "authenticate", "authorize", "encrypt",
+        "verify", "sanitize", "validate",
+    ];
+    if SECURITY_KEYWORDS.iter().any(|&k| fn_name.contains(k)) {
+        SecurityTier::Tier1
+    } else if has_annotations {
+        SecurityTier::Tier2
+    } else {
+        SecurityTier::Tier3
+    }
+}
+
+/// Format a SWI classification report.
+pub fn swi_report(functions: &[(String, SecurityTier)]) -> String {
+    let mut report = String::from("SWI Classification:\n");
+    for (fn_name, tier) in functions {
+        let label = match tier {
+            SecurityTier::Tier1 => "Tier1 (security-critical)",
+            SecurityTier::Tier2 => "Tier2 (annotated)",
+            SecurityTier::Tier3 => "Tier3 (skipped)",
+        };
+        report.push_str(&format!("  fn {} -> {}\n", fn_name, label));
+    }
+    report
+}
+
+#[cfg(test)]
+mod swi_tests {
+    use super::*;
+
+    #[test]
+    fn test_swi_tier1() {
+        assert_eq!(classify_tier("classify", false), SecurityTier::Tier1);
+    }
+
+    #[test]
+    fn test_swi_tier1_authenticate() {
+        assert_eq!(classify_tier("authenticate_user", false), SecurityTier::Tier1);
+    }
+
+    #[test]
+    fn test_swi_tier2() {
+        assert_eq!(classify_tier("process", true), SecurityTier::Tier2);
+    }
+
+    #[test]
+    fn test_swi_tier3() {
+        assert_eq!(classify_tier("get_timestamp", false), SecurityTier::Tier3);
+    }
+
+    #[test]
+    fn test_swi_report_format() {
+        let fns = vec![
+            ("classify".to_string(), SecurityTier::Tier1),
+            ("get_name".to_string(), SecurityTier::Tier3),
+        ];
+        let report = swi_report(&fns);
+        assert!(report.contains("Tier1"));
+        assert!(report.contains("Tier3"));
+        assert!(report.contains("classify"));
+    }
+}
+
+// ── Phase 5.5-06: Incremental Verification Cache (IVC) ───────
+
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CacheResult {
+    Verified,
+    Unknown,
+    Violated,
+}
+
+#[derive(Debug, Clone)]
+pub struct WitnessEntry {
+    pub fn_name    : String,
+    pub source_hash: u64,
+    pub result     : CacheResult,
+    pub timestamp  : u64,
+}
+
+pub struct IVCCache {
+    entries: HashMap<String, WitnessEntry>,
+    hits    : usize,
+    misses  : usize,
+}
+
+impl IVCCache {
+    pub fn new() -> Self {
+        IVCCache { entries: HashMap::new(), hits: 0, misses: 0 }
+    }
+
+    /// Hash function source + annotations for cache key.
+    pub fn hash_source(fn_name: &str, source: &str) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        fn_name.hash(&mut h);
+        source.hash(&mut h);
+        h.finish()
+    }
+
+    /// Look up a cached verification result.
+    /// Returns None on cache miss (or if result was Violated — never cache violations).
+    pub fn get(&mut self, fn_name: &str, source: &str) -> Option<&CacheResult> {
+        let key  = Self::hash_source(fn_name, source);
+        let now  = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if let Some(entry) = self.entries.get(fn_name) {
+            // Invalidate if hash changed or entry > 30 days old
+            let stale = entry.source_hash != key
+                || (now - entry.timestamp) > 60 * 60 * 24 * 30;
+            if stale {
+                self.entries.remove(fn_name);
+                self.misses += 1;
+                return None;
+            }
+            self.hits += 1;
+            return Some(&self.entries[fn_name].result);
+        }
+        self.misses += 1;
+        None
+    }
+
+    /// Store a verification result. Violated results are never cached.
+    pub fn set(&mut self, fn_name: &str, source: &str, result: CacheResult) {
+        if result == CacheResult::Violated { return; }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.entries.insert(fn_name.to_string(), WitnessEntry {
+            fn_name    : fn_name.to_string(),
+            source_hash: Self::hash_source(fn_name, source),
+            result,
+            timestamp  : now,
+        });
+    }
+
+    /// Cache statistics summary.
+    pub fn stats(&self) -> String {
+        let total = self.hits + self.misses;
+        let rate  = if total > 0 {
+            (self.hits as f64 / total as f64 * 100.0) as usize
+        } else { 0 };
+        format!("Cache: {} hits, {} misses, {}% hit rate",
+            self.hits, self.misses, rate)
+    }
+
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total == 0 { 0.0 } else { self.hits as f64 / total as f64 }
+    }
+}
+
+#[cfg(test)]
+mod ivc_tests {
+    use super::*;
+
+    #[test]
+    fn test_ivc_miss_on_empty() {
+        let mut cache = IVCCache::new();
+        assert!(cache.get("classify", "fn classify() {}").is_none());
+    }
+
+    #[test]
+    fn test_ivc_hit_after_set() {
+        let mut cache = IVCCache::new();
+        cache.set("classify", "fn classify() {}", CacheResult::Verified);
+        assert_eq!(
+            cache.get("classify", "fn classify() {}"),
+            Some(&CacheResult::Verified)
+        );
+    }
+
+    #[test]
+    fn test_ivc_miss_after_source_change() {
+        let mut cache = IVCCache::new();
+        cache.set("f", "fn f() { 1 }", CacheResult::Verified);
+        // Different source → cache miss
+        assert!(cache.get("f", "fn f() { 2 }").is_none());
+    }
+
+    #[test]
+    fn test_ivc_violated_not_cached() {
+        let mut cache = IVCCache::new();
+        cache.set("f", "fn f() {}", CacheResult::Violated);
+        assert!(cache.get("f", "fn f() {}").is_none());
+    }
+
+    #[test]
+    fn test_ivc_hit_rate() {
+        let mut cache = IVCCache::new();
+        cache.set("f", "source", CacheResult::Verified);
+        cache.get("f", "source"); // hit
+        cache.get("f", "source"); // hit
+        cache.get("g", "other");  // miss
+        assert!(cache.hit_rate() > 0.6);
+    }
+
+    #[test]
+    fn test_ivc_stats_format() {
+        let mut cache = IVCCache::new();
+        cache.set("f", "src", CacheResult::Verified);
+        cache.get("f", "src");
+        let stats = cache.stats();
+        assert!(stats.contains("hits"));
+        assert!(stats.contains("misses"));
+    }
+}

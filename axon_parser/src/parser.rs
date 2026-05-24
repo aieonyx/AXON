@@ -36,12 +36,14 @@ pub struct Parser<'src> {
     pos     : usize,
     source  : &'src str,
     file_id : FileId,
-    pub errors : Vec<ParseError>,
+    pub errors          : Vec<ParseError>,
+    steps_remaining   : usize,
+    parse_depth       : usize,
 }
 
 impl<'src> Parser<'src> {
     pub fn new(tokens: Vec<Token>, source: &'src str, file_id: FileId) -> Self {
-        Parser { tokens, pos: 0, source, file_id, errors: Vec::new() }
+        Parser { tokens, pos: 0, source, file_id, errors: Vec::new(), steps_remaining: 100_000, parse_depth: 0 }
     }
 
     pub fn into_errors(self) -> Vec<ParseError> { self.errors }
@@ -68,6 +70,19 @@ impl<'src> Parser<'src> {
     pub fn current_span(&self) -> Span    { self.peek().span  }
 
     pub fn advance(&mut self) -> Token {
+        // PARSER_INVARIANT: step limit prevents infinite loops on pathological input
+        self.steps_remaining = self.steps_remaining.saturating_sub(1);
+        if self.steps_remaining == 0 {
+            if self.errors.len() < 20 {
+                let span = self.current_span();
+                self.errors.push(ParseError::Custom {
+                    message: "parse step limit exceeded (pathological input)".to_string(),
+                    span,
+                    hint: Some("input may cause exponential parse behavior".to_string()),
+                });
+            }
+            return self.tokens.last().cloned().expect("token stream must end with Eof");
+        }
         while self.pos < self.tokens.len() {
             match &self.tokens[self.pos].kind {
                 TokenKind::Comment(_) | TokenKind::DocComment(_) => { self.pos += 1; }
@@ -127,10 +142,33 @@ impl<'src> Parser<'src> {
         }
     }
 
+    /// SEC — Syntax Error Catalog stub (Phase 5.5-02B)
+    /// Returns a repair hint for known error patterns.
+    fn sec_hint(message: &str) -> Option<String> {
+        if message.contains("expected ':'") {
+            Some("add ':' after the declaration to begin the body".to_string())
+        } else if message.contains("expected )") {
+            Some("check for a missing closing parenthesis".to_string())
+        } else if message.contains("expected =>") || message.contains("FatArrow") {
+            Some("match arms require '=>' between pattern and body".to_string())
+        } else if message.contains("expected") && message.contains("identifier") {
+            Some("an identifier (name) is required here".to_string())
+        } else if message.contains("expected type") {
+            Some("specify a type such as Int, Str, Bool, or a named type".to_string())
+        } else {
+            None
+        }
+    }
+
+    /// SEC — Syntax Error Catalog stub (Phase 5.5-02B)
+    /// Returns a repair hint for known error patterns.
+
     pub fn error(&mut self, span: Span, message: impl Into<String>) {
         if self.errors.len() < 20 {
+            let msg  = message.into();
+            let hint = Self::sec_hint(&msg);
             self.errors.push(ParseError::Custom {
-                message: message.into(), span, hint: None,
+                message: msg, span, hint,
             });
         }
     }
@@ -462,6 +500,10 @@ impl<'src> Parser<'src> {
 
             if let Some(stmt) = self.parse_stmt() {
                 stmts.push(stmt);
+            } else if !self.at_eof() && !self.at(&TokenKind::Dedent) {
+                // PARSER_INVARIANT: advance past unrecognized token
+                // prevents infinite loop when parse_stmt returns None
+                self.advance();
             }
         }
 
@@ -851,6 +893,18 @@ impl<'src> Parser<'src> {
     }
 
     fn pratt_expr(&mut self, min_bp: u8) -> Option<Expr> {
+        self.parse_depth = self.parse_depth.saturating_add(1);
+        if self.parse_depth > 512 {
+            let span = self.current_span();
+            if self.errors.len() < 20 {
+                self.errors.push(ParseError::Custom {
+                    message: "expression nesting limit exceeded".to_string(),
+                    span, hint: Some("reduce nesting depth".to_string()),
+                });
+            }
+            self.parse_depth = self.parse_depth.saturating_sub(1);
+            return None;
+        }
         // Null denotation (prefix / primary)
         let mut left = self.parse_nud()?;
 
@@ -1307,6 +1361,22 @@ mod tests {
     }
 
     // ── Existing tests (P2-05 through P2-09) ─────────────────
+
+    #[test]
+    fn test_sec_hint_colon() {
+        // "fn f()" missing ':' should produce error with colon hint
+        let r = crate::parse("fn f()
+", file());
+        assert!(!r.errors.is_empty(), "expected parse error for missing colon");
+        let has_hint = r.errors.iter().any(|e| match e {
+            crate::error::ParseError::Custom { hint: Some(h), .. } =>
+                h.contains("':'") || h.contains("body"),
+            _ => false,
+        });
+        assert!(has_hint, "expected colon hint in errors: {:?}", r.errors);
+    }
+
+    #[test]
 
     #[test] fn test_parse_empty_source() {
         let r = crate::parse("", file());

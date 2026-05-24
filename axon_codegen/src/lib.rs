@@ -24,6 +24,8 @@ pub mod types;
 pub mod error;
 
 pub use generator::CodeGen;
+pub use apr::APR;
+pub mod apr;
 pub use error::CodegenError;
 
 use axon_lexer::FileId;
@@ -188,3 +190,60 @@ mod tests {
         matches!(result.unwrap_err(), CodegenError::ParseErrors(_));
     }
 }
+
+/// Parallel codegen — compiles fn items using rayon.
+/// Enable with AXON_PARALLEL=1 environment variable.
+pub fn codegen_parallel(source: &str) -> Result<String, CodegenError> {
+    use rayon::prelude::*;
+    use axon_parser::ast::TopLevelItem;
+
+    let file_id = FileId(1);
+    let result  = axon_parser::parse(source, file_id);
+    if !result.errors.is_empty() {
+        return Err(CodegenError::ParseErrors(
+            result.errors.iter().map(|e| format!("{:?}", e)).collect()
+        ));
+    }
+    let program = &result.program;
+
+    // Step 1: Build enum registry once (sequential — needed for type resolution)
+    let mut base_gen = CodeGen::new();
+    base_gen.build_enum_registry(program);
+    let registry = base_gen.enum_registry.clone();
+
+    // Step 2: Emit header + imports + non-fn items sequentially
+    let mut header_gen = CodeGen::new();
+    header_gen.build_enum_registry(program);
+    header_gen.emit_program_header(program);
+    for item in &program.items {
+        match item {
+            TopLevelItem::Fn(_) | TopLevelItem::Task(_) => {}
+            other => { header_gen.emit_top_level_item(other); header_gen.blank(); }
+        }
+    }
+    let header_output = header_gen.finish();
+
+    // Step 3: Compile fn/task items in parallel
+    let fn_items: Vec<(usize, &TopLevelItem)> = program.items
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| matches!(i, TopLevelItem::Fn(_) | TopLevelItem::Task(_)))
+        .collect();
+
+    let mut fn_outputs: Vec<(usize, String)> = fn_items
+        .par_iter()
+        .map(|(idx, item)| {
+            let mut gen = CodeGen::new();
+            gen.enum_registry = registry.clone();
+            gen.emit_top_level_item(item);
+            gen.blank();
+            (*idx, gen.finish())
+        })
+        .collect();
+
+    fn_outputs.sort_by_key(|(idx, _)| *idx);
+
+    let fn_output: String = fn_outputs.into_iter().map(|(_, s)| s).collect();
+    Ok(header_output + &fn_output)
+}
+

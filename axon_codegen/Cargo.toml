@@ -6,5 +6,6 @@ description = "AXON → Rust transpiler"
 authors     = ["Edison Lepiten <aieonyx>"]
 
 [dependencies]
+rayon = "1.10"
 axon_lexer  = { workspace = true }
 axon_parser = { workspace = true }
