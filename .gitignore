@@ -6,3 +6,6 @@ Cargo.lock
 *.docx
 *.doc
 *.pdf
+fuzz_24h*.log
+nohup.out
+*.log

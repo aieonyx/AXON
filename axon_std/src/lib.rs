@@ -42,7 +42,7 @@ pub mod sys {
                 use super::*;
                 #[test]
                 fn test_channel_opens() {
-                    let ch = open_channel();
+                    let ch = open_channel::<T>();
                     assert!(ch.is_ok());
                 }
             }
