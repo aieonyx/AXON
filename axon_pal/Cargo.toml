@@ -1,0 +1,19 @@
+[package]
+name = "axon_pal"
+version = "0.6.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license = "Apache-2.0"
+description = "AXON Platform Abstraction Layer — trait interface for all OS targets"
+repository = "https://github.com/aieonyx/AXON"
+keywords = ["axon", "aieonyx", "no-std", "pal", "systems"]
+categories = ["no-std", "os"]
+readme = "README.md"
+
+[features]
+default = []
+
+[dependencies]
+axon_core = { path = "../axon_core" }
+
+[dev-dependencies]
