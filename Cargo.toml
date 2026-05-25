@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "axon_core",
+    "axon_alloc",
     "axon_lexer",
     "axon_parser",
     "axon_codegen",
