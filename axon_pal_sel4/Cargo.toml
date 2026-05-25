@@ -1,0 +1,20 @@
+[package]
+name = "axon_pal_sel4"
+version = "0.6.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license = "Apache-2.0"
+description = "AXON PAL implementation — seL4 aarch64 (sovereign seL4 ABI)"
+repository = "https://github.com/aieonyx/AXON"
+keywords = ["axon", "aieonyx", "sel4", "pal", "aarch64"]
+categories = ["no-std", "os"]
+readme = "README.md"
+
+[features]
+default = []
+
+[dependencies]
+axon_core = { path = "../axon_core" }
+axon_pal  = { path = "../axon_pal"  }
+
+[dev-dependencies]
