@@ -2,7 +2,7 @@
 name = "axon_core"
 version = "0.6.0"
 edition = "2021"
-authors = ["Edison Lepiten <ed@aieonyx.com>"]
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
 license = "Apache-2.0"
 description = "AXON language core primitives — no_std, zero dependencies"
 repository = "https://github.com/aieonyx/AXON"
