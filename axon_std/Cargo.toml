@@ -1,9 +1,14 @@
 [package]
 name        = "axon_std"
-version     = "0.1.0"
+version     = "0.6.0"
 edition     = "2021"
 description = "AXON standard library — sovereign systems primitives"
-authors     = ["Edison Lepiten <aieonyx>"]
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+repository  = "https://github.com/aieonyx/AXON"
 
 [dependencies]
-axon_rt = { path = "../axon_rt" }
+axon_rt    = { path = "../axon_rt"    }
+axon_core  = { path = "../axon_core"  }
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
