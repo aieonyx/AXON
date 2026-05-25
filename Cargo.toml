@@ -5,6 +5,7 @@ members = [
     "axon_alloc",
     "axon_pal",
     "axon_pal_linux",
+    "axon_pal_sel4",
     "axon_lexer",
     "axon_parser",
     "axon_codegen",
