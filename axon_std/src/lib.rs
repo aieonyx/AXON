@@ -81,3 +81,8 @@ pub mod collections {
 /// Requires Ollama running at localhost:11434.
 /// Zero cloud dependency. LLM is never in the TCB.
 pub mod ai;
+
+// ── axon.verify (SL-07) ───────────────────────────────────────
+/// axon::verify — runtime formal verification.
+/// @ensures postconditions, contract cache, DWC, DVG, QCC.
+pub mod verify;
