@@ -25,6 +25,6 @@ axon_ai     = { path = "axon_ai"      }
 
 [workspace.metadata]
 description = "AXON — AI-Native Programming Language"
-authors     = ["Edison Lepiten <aieonyx>"]
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
 license     = "SEE LICENSE FILE"
 repository  = "https://github.com/aieonyx/axon"
