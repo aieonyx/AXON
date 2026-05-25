@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "axon_core",
     "axon_lexer",
     "axon_parser",
     "axon_codegen",
@@ -13,7 +14,8 @@ members = [
 
 # Workspace-wide dependency versions
 [workspace.dependencies]
-axon_lexer   = { path = "axon_lexer"   }
+axon_core    = { path = "axon_core"    }
+    axon_lexer   = { path = "axon_lexer"   }
 axon_parser  = { path = "axon_parser"  }
 axon_codegen = { path = "axon_codegen" }
 axon_rt      = { path = "axon_rt"      }

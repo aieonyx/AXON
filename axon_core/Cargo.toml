@@ -1,0 +1,19 @@
+[package]
+name = "axon_core"
+version = "0.6.0"
+edition = "2021"
+authors = ["Edison Lepiten <ed@aieonyx.com>"]
+license = "Apache-2.0"
+description = "AXON language core primitives — no_std, zero dependencies"
+repository = "https://github.com/aieonyx/AXON"
+keywords = ["axon", "aieonyx", "no-std", "embedded", "systems"]
+categories = ["no-std", "rust-patterns"]
+readme = "README.md"
+
+[features]
+default = []
+alloc = []
+error_in_core = []
+
+[dependencies]
+[dev-dependencies]
