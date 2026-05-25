@@ -1,0 +1,20 @@
+[package]
+name = "axon_alloc"
+version = "0.6.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license = "Apache-2.0"
+description = "AXON heap allocation layer — Vec, String, HashMap, Box, Arc"
+repository = "https://github.com/aieonyx/AXON"
+keywords = ["axon", "aieonyx", "no-std", "alloc", "collections"]
+categories = ["no-std", "data-structures"]
+readme = "README.md"
+
+[features]
+default = []
+
+[dependencies]
+axon_core  = { path = "../axon_core" }
+hashbrown  = { version = "0.14", default-features = false, features = ["ahash"] }
+
+[dev-dependencies]
