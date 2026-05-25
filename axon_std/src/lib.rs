@@ -42,7 +42,7 @@ pub mod sys {
                 use super::*;
                 #[test]
                 fn test_channel_opens() {
-                    let ch = open_channel::<T>();
+                    let ch = open_channel::<String>();
                     assert!(ch.is_ok());
                 }
             }
@@ -75,3 +75,9 @@ pub mod collections {
     pub use std::collections::HashMap;
     pub use std::collections::HashSet;
 }
+
+// ── axon.ai (SL-06) ───────────────────────────────────────────
+/// axon::ai — sovereign, local-first AI inference.
+/// Requires Ollama running at localhost:11434.
+/// Zero cloud dependency. LLM is never in the TCB.
+pub mod ai;

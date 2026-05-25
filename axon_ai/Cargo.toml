@@ -3,7 +3,7 @@ name        = "axon_ai"
 version     = "0.1.0"
 edition     = "2021"
 description = "AXON AI Assistance Engine — Phase 5"
-authors     = ["Edison Lepiten <aieonyx>"]
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
 
 # Architecture decision (post-peer-review):
 # AI is ASSISTANT. Formal methods are GATE.
