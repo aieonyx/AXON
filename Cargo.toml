@@ -6,6 +6,8 @@ members = [
     "axon_pal",
     "axon_pal_linux",
     "axon_pal_sel4",
+    "axon_pal_macos",
+    "axon_pal_windows",
     "axon_lexer",
     "axon_parser",
     "axon_codegen",
