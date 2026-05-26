@@ -1,0 +1,15 @@
+[package]
+name        = "axon_pal_macos"
+version     = "0.6.0"
+edition     = "2021"
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+description = "AXON PAL — macOS Darwin XNU (POSIX)"
+repository  = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_core = { path = "../axon_core" }
+axon_pal  = { path = "../axon_pal"  }
+libc      = "0.2"
+
+[dev-dependencies]
