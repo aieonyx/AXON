@@ -1,0 +1,18 @@
+[package]
+name        = "axon_integration"
+version     = "0.6.0"
+edition     = "2021"
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+description = "AXON Phase 6 integration test suite"
+repository  = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_core        = { path = "../axon_core"        }
+axon_alloc       = { path = "../axon_alloc"       }
+axon_pal         = { path = "../axon_pal"         }
+axon_pal_linux   = { path = "../axon_pal_linux"   }
+axon_std         = { path = "../axon_std"         }
+libc             = "0.2"
+
+[dev-dependencies]

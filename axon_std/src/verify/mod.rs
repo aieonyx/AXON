@@ -41,7 +41,8 @@ pub mod quorum;
 pub mod witness;
 
 pub use check::{check_postcondition, VerificationError, VerifyResult};
-pub use cache::{ContractCache, CachedVerification, CacheStats};
+pub use cache::{ContractCache, CachedVerification, CacheStats,
+               cache_stats, cache_hit_rate, cache_invalidate};
 pub use witness::{DynamicWitness, WitnessKind};
 pub use guard::{DependentGuard, GuardViolation};
 pub use quorum::{QuorumGate, QuorumResult};
