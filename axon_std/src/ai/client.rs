@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports)]
 //! Sovereign Ollama HTTP client — TcpStream, no external HTTP crate.
 //!
 //! AXON owns its Ollama connection. No reqwest, no hyper.

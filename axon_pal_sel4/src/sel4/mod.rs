@@ -7,7 +7,6 @@
 //! ABI: aarch64 — syscall via `svc #0`, registers x0-x7.
 
 pub mod ipc;
-pub mod syscall;
 
 // ── Capability pointers ───────────────────────────────────────────────────────
 

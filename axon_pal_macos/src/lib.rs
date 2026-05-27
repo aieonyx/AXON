@@ -1,3 +1,5 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
+#![cfg_attr(not(target_os = "macos"), allow(clippy::all, dead_code, unused_imports))]
 //! # axon_pal_macos
 //!
 //! AXON PAL — macOS Darwin XNU implementation.

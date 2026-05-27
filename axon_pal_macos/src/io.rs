@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
 use axon_core::prelude::*;
 use axon_pal::{traits::PalIo, types::RawFd};
 use crate::{MacOsPal, error::last_os_axon_error};

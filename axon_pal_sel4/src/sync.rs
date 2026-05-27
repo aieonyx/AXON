@@ -2,7 +2,6 @@
 
 use axon_core::prelude::*;
 use axon_pal::{traits::PalSync, types::RawHandle};
-use crate::{Sel4Pal, sel4::syscall};
 
 impl PalSync for Sel4Pal {
     fn mutex_new() -> AxonResult<RawHandle> {

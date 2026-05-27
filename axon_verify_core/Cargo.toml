@@ -11,3 +11,6 @@ repository  = "https://github.com/aieonyx/AXON"
 [dependencies]
 
 [dev-dependencies]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

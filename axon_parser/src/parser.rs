@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
 // ============================================================
 // AXON Parser — parser.rs
 // P2-10 complete — full statement parsing

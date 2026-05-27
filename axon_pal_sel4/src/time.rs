@@ -1,3 +1,4 @@
+#![allow(clippy::empty_line_after_doc_comments)]
 //! PalTime for seL4 — timer server IPC.
 use axon_core::prelude::*;
 use axon_pal::{traits::PalTime, types::{Duration, SystemTime}};

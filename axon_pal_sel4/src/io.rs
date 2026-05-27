@@ -7,7 +7,6 @@
 use axon_core::prelude::*;
 use axon_pal::{traits::PalIo, types::RawFd};
 use crate::Sel4Pal;
-use crate::sel4::{MessageInfo, syscall};
 
 /// Conventional capability slot for the console server endpoint.
 const CONSOLE_EP: usize = 16;

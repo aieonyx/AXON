@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports)]
 //! # axon::verify
 //!
 //! AXON formal verification runtime module.

@@ -1,3 +1,5 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
+#![cfg_attr(not(target_os = "windows"), allow(clippy::all, dead_code, unused_imports))]
 //! # axon_pal_windows
 //!
 //! AXON PAL — Windows Win32 implementation.

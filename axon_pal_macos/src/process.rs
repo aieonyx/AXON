@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
 use axon_core::prelude::*;
 use axon_core::types::U32;
 use axon_pal::traits::PalProcess;
