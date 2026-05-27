@@ -9,3 +9,4 @@ Cargo.lock
 fuzz_24h*.log
 nohup.out
 *.log
+.aider*
