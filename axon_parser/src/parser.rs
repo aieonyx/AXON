@@ -24,6 +24,7 @@ use crate::ast::{
     Pattern, PatternField, EnumPattern,
     Expr, Literal,
     Decorator, DecoratorArg,
+    ContractClause, ContractClauseKind,
     UsesList, EffectName,
     MemMode, AssignStmt, AssignTarget, AssignOp,
     FieldAccessExpr,
@@ -419,9 +420,10 @@ impl<'src> Parser<'src> {
             self.advance(); self.parse_type()
         } else { None };
         let uses = self.parse_uses_clause();
+        let contracts = self.parse_contract_clauses();
         self.expect(&TokenKind::Colon)?;
         let body = self.parse_block();
-        Some(FnDecl { span, decorators, name, generics, params, uses, ret_type, body })
+        Some(FnDecl { span, decorators, name, generics, params, uses, ret_type, body, contracts })
     }
 
     fn parse_task_decl(&mut self, decorators: Vec<Decorator>) -> Option<TaskDecl> {
@@ -439,9 +441,10 @@ impl<'src> Parser<'src> {
             self.advance(); self.parse_type()
         } else { None };
         let uses = self.parse_uses_clause();
+        let contracts = self.parse_contract_clauses();
         self.expect(&TokenKind::Colon)?;
         let body = self.parse_block();
-        Some(TaskDecl { span, decorators, name, generics, params, uses, ret_type, body })
+        Some(TaskDecl { span, decorators, name, generics, params, uses, ret_type, body, contracts: vec![] })
     }
 
     fn parse_params(&mut self) -> Vec<Param> {
@@ -2575,5 +2578,55 @@ mod tests {
         println!("  ✓ classify fn — match statement body");
         println!("  ✓ monitor task — let@, defer, for");
         println!("\n  PHASE 2 COMPLETE. AXON IS A LANGUAGE.\n");
+    }
+}
+// ── DWC Contract Clause parsing — SPEC: 6A-01 ───────────────
+fn contains_old_call(expr:&crate::ast::Expr)->bool{
+    use crate::ast::Expr;
+    match expr{
+        Expr::Call(c)=>{
+            if c.callee.name=="old"{return true;}
+            c.args.iter().any(|a|contains_old_call(&a.value))
+        }
+        Expr::BinOp(b)=>contains_old_call(&b.lhs)||contains_old_call(&b.rhs),
+        Expr::UnaryOp(u)=>contains_old_call(&u.expr),
+        Expr::MethodCall(m)=>contains_old_call(&m.receiver)||m.args.iter().any(|a|contains_old_call(&a.value)),
+        Expr::FieldAccess(f)=>contains_old_call(&f.object),
+        Expr::Index(i)=>contains_old_call(&i.object)||contains_old_call(&i.index),
+        _=>false,
+    }
+}
+impl<'src> Parser<'src>{
+    fn is_ident_str(&self,s:&str)->bool{
+        matches!(self.tokens.get(self.pos),Some(t) if matches!(&t.kind,axon_lexer::TokenKind::Ident(n) if n==s))
+    }
+    fn parse_contract_clauses(&mut self)->Vec<ContractClause>{
+        let mut clauses=Vec::new();
+        loop{
+            let kind=if self.is_ident_str("pre"){
+                ContractClauseKind::Pre
+            }else if self.is_ident_str("post"){
+                ContractClauseKind::Post
+            }else if self.is_ident_str("invariant"){
+                ContractClauseKind::Invariant
+            }else{break;};
+            let span=self.current_span();
+            self.advance();
+            if self.expect(&axon_lexer::TokenKind::LBracket).is_none(){break;}
+            let label=match self.parse_ident("contract label"){Some(i)=>i,None=>break};
+            if self.expect(&axon_lexer::TokenKind::RBracket).is_none(){break;}
+            if self.expect(&axon_lexer::TokenKind::Colon).is_none(){break;}
+            let predicate=match self.parse_expr(){Some(e)=>e,None=>break};
+            if kind==ContractClauseKind::Pre&&contains_old_call(&predicate){
+                self.errors.push(crate::error::ParseError::Custom{
+                    message:"AX0041: old() is not valid in a pre clause".to_string(),
+                    span,
+                    hint:Some("old() captures the entry value, which equals the current value in a pre clause. Did you mean post?".to_string()),
+                });
+            }
+            if self.at(&axon_lexer::TokenKind::Comma){self.advance();}
+            clauses.push(ContractClause{span,kind,label,predicate});
+        }
+        clauses
     }
 }

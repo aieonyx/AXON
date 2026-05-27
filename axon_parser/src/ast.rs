@@ -96,6 +96,7 @@ pub struct FnDecl {
     pub uses        : Option<UsesList>,   // [v0.3]
     pub ret_type    : Option<Type>,
     pub body        : Block,
+    pub contracts   : Vec<ContractClause>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +109,7 @@ pub struct TaskDecl {
     pub uses        : Option<UsesList>,   // [v0.3]
     pub ret_type    : Option<Type>,
     pub body        : Block,
+    pub contracts   : Vec<ContractClause>,
 }
 
 /// Effect/capability declarations on fn and task — v0.3
@@ -1063,3 +1065,15 @@ pub enum IntentConstraintKind {
 //
 // This is noted here as a pending update to the Program struct above.
 // The parser implementation (P2-07) will apply this change.
+
+// ── DWC Contract Clause types — SPEC: 6A-01 ────────────────
+#[derive(Debug,Clone,PartialEq,Eq)]
+pub enum ContractClauseKind{Pre,Post,Invariant}
+
+#[derive(Debug,Clone)]
+pub struct ContractClause{
+    pub span:Span,
+    pub kind:ContractClauseKind,
+    pub label:Ident,
+    pub predicate:Expr,
+}
