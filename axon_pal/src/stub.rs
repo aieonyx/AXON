@@ -45,7 +45,7 @@ impl PalTime for StubPal {
 impl PalProcess for StubPal {
     fn args() -> AxonResult<&'static [&'static str]> { AxonResult::Ok(&[]) }
     fn env_var(_k: &str) -> AxonResult<&'static str> { AxonResult::Err(AxonError::not_found("StubPal: env vars not available")) }
-    fn exit(_code: U32) -> ! { loop {} }
+    fn exit(_code: U32) -> ! { todo!("PAL stub: exit not implemented") }
     fn pid() -> AxonResult<U32> { AxonResult::Err(AxonError::not_implemented("StubPal::pid")) }
 }
 

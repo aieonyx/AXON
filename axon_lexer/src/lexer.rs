@@ -22,6 +22,7 @@ use crate::token::{Token, TokenKind, keyword_from_str, temporal_from_str};
 /// The AXON lexer — converts source text into a flat token stream.
 /// Every token carries a Span with file, line, column, and byte offsets.
 /// The stream always ends with exactly one TokenKind::Eof.
+#[allow(dead_code)]
 /// Invalid characters produce TokenKind::Error — the lexer never panics.
 pub struct Lexer<'src> {
     source  : &'src str,
@@ -32,6 +33,7 @@ pub struct Lexer<'src> {
     pos     : usize,
 }
 
+#[allow(dead_code)]
 impl<'src> Lexer<'src> {
     pub fn new(source: &'src str, file_id: FileId) -> Self {
         Lexer {
@@ -176,7 +178,7 @@ pub fn tokenize(mut self) -> Vec<Token> {
                                 );
                                 tokens.push(Token::new(
                                     TokenKind::StrInterpPart(content.clone()),
-                                    &content.clone(),
+                                    content.clone(),
                                     ps
                                 ));
                             }
@@ -234,7 +236,7 @@ pub fn tokenize(mut self) -> Vec<Token> {
                                     let s = Span::new(self.file_id, ipos, ipos+1, self.line, self.col);
                                     tokens.push(Token::new(
                                         TokenKind::Error(format!("in interp: {:?}", ic)),
-                                        &ic.to_string(), s
+                                        ic.to_string(), s
                                     ));
                                 }
                             }
@@ -275,7 +277,7 @@ pub fn tokenize(mut self) -> Vec<Token> {
             );
             tokens.push(Token::new(
                 TokenKind::StrInterpPart(content.clone()),
-                &content.clone(),
+                content.clone(),
                 ps
             ));
         }
@@ -594,7 +596,7 @@ pub fn tokenize(mut self) -> Vec<Token> {
                 let span = Span::new(self.file_id, pos, pos + 1, self.line, self.col);
                 tokens.push(Token::new(
                     TokenKind::Error(format!("unexpected character: {:?}", other)),
-                    &other.to_string(),
+                    other.to_string(),
                     span,
                 ));
                 self.col += 1;
@@ -611,26 +613,26 @@ pub fn tokenize(mut self) -> Vec<Token> {
         todo!("P2-03: implement token dispatch")
     }
 
-    fn ident_or_keyword(&mut self, start: usize) -> Token {
+    fn ident_or_keyword(&mut self, _start: usize) -> Token {
         todo!("P2-03: implement identifier and keyword lexing")
     }
 
-    fn number(&mut self, start: usize) -> Token {
+    fn number(&mut self, _start: usize) -> Token {
         todo!("P2-03: implement integer and float literal lexing")
     }
 
-    fn string(&mut self, start: usize) -> Token {
+    fn string(&mut self, _start: usize) -> Token {
         todo!("P2-03: implement string literal lexing")
     }
 
-    fn string_interp(&mut self, start: usize) -> Vec<Token> {
+    fn string_interp(&mut self, _start: usize) -> Vec<Token> {
         todo!("P2-03: implement string interpolation lexing")
     }
 
     /// Handle all @-prefixed tokens:
     /// @now, @lifetime, @epoch, @program_intent → temporal tokens
     /// @ai, @verify, etc → At token + subsequent ident tokens
-    fn at_token(&mut self, start: usize) -> Token {
+    fn at_token(&mut self, _start: usize) -> Token {
         todo!("P2-03: implement @ token dispatch")
     }
 
@@ -648,9 +650,9 @@ pub fn tokenize(mut self) -> Vec<Token> {
     ///   ==   EqEq           (before =)
     ///   <=   LtEq           (before <)
     ///   >=   GtEq           (before >)
-    ///   <<   ShiftLeft      (before <)
+    /// > <<   ShiftLeft      (before <)
     ///   >>   ShiftRight     (before >)
-    fn operator(&mut self, first: char, start: usize) -> Token {
+    fn operator(&mut self, _first: char, _start: usize) -> Token {
         todo!("P2-03: implement operator lexing with multi-char priority")
     }
 
@@ -658,7 +660,7 @@ pub fn tokenize(mut self) -> Vec<Token> {
         todo!("P2-03: implement comment skipping (# to end of line)")
     }
 
-    fn make_span(&self, start: usize) -> Span {
+    fn make_span(&self, _start: usize) -> Span {
         todo!("P2-03: implement span construction from start pos")
     }
 

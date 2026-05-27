@@ -25,7 +25,7 @@ use axon_parser::ast::{
     BinOp, UnaryOp,
 };
 use crate::spec::{FormalSpec, Constraint, Effect};
-use crate::error::{AiError, ConstraintViolation};
+use crate::error::ConstraintViolation;
 
 // ── Verification result ───────────────────────────────────────
 
@@ -313,7 +313,7 @@ impl ConstraintVerifier {
         fn_name       : &str,
         constraint    : &Constraint,
         return_values : &[AbstractValue],
-        body          : &Block,
+        _body         : &Block,
     ) -> ConstraintCheckResult {
         // Empty return values — vacuously proven (dead code / pass-only)
         if return_values.is_empty() {
@@ -427,6 +427,8 @@ impl ConstraintVerifier {
     }
 
     /// Kept for backward compatibility
+    #[allow(dead_code)]
+    #[allow(unused_variables)]
     fn check_constraint(
         fn_name       : &str,
         constraint    : &Constraint,

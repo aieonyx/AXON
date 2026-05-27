@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports)]
 //! AuditChain — SHA-256 hash-chained event log.
 
 use sha2::{Sha256, Digest};

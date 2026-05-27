@@ -23,8 +23,8 @@
 // ============================================================
 
 use axon_parser::ast::{
-    Decorator, DecoratorArg,
-    Expr, Literal, BinOp, UnaryOp,
+    Decorator,
+    Expr, Literal, BinOp,
 };
 use crate::spec::{FormalSpec, Constraint, Effect};
 

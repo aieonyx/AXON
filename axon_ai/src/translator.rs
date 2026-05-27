@@ -321,3 +321,6 @@ JSON output:"#,
         spec
     }
 }
+impl Default for IntentTranslator {
+    fn default() -> Self { Self::new() }
+}

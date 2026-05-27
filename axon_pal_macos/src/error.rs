@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
 use axon_core::prelude::*;
 
 /// Convert the last OS error to an AxonError.

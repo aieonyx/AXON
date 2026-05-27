@@ -26,6 +26,7 @@
 //   VerificationResult { Verified | Violated }   ← compile-time result
 // ============================================================
 
+pub mod contract_suggestor;
 pub mod spec;
 pub mod translator;
 pub mod verifier;
@@ -37,6 +38,7 @@ pub use translator::IntentTranslator;
 pub use verifier::{ConstraintVerifier, VerificationResult, VerificationStatus, AbstractValue};
 pub use constraint_parser::{extract_spec, has_formal_spec, expr_to_constraint, expr_to_effect, parse_constraint_string};
 pub use error::{AiError, ConstraintViolation};
+pub use contract_suggestor::{ContractSuggestor, ContractSuggestion, SuggestionKind};
 
 use axon_lexer::FileId;
 use axon_parser::ast::FnDecl;
@@ -584,4 +586,7 @@ mod ivc_tests {
         assert!(stats.contains("hits"));
         assert!(stats.contains("misses"));
     }
+}
+impl Default for IVCCache{
+    fn default()->Self{Self::new()}
 }

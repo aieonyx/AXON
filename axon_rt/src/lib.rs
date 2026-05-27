@@ -1,3 +1,16 @@
+// ── DWC modules (SPEC: 6A-01) ─────────────────────────────────
+pub mod monotonic;
+pub mod witness;
+pub mod witness_analysis;
+
+pub use witness::{
+    ContractId, ContractViolation, OverflowPolicy, SourceLocation,
+    Verdict, WitnessKind, WitnessPayload, WitnessRecord, WitnessStore,
+    store,
+};
+pub use witness_analysis::{NullAnalyser, WitnessAnalyser};
+pub use monotonic::monotonic_ns;
+
 // ============================================================
 // axon_rt — AXON Runtime
 // Copyright © 2026 Edison Lepiten — AIEONYX

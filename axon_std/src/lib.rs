@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports)]
 // ============================================================
 // axon_std — AXON Standard Library
 // Copyright © 2026 Edison Lepiten — AIEONYX

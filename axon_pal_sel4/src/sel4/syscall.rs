@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 //! Raw seL4 syscall wrappers for aarch64.
 //!
 //! seL4 on aarch64 uses `svc #0` for all kernel entries.

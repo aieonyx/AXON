@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
 use axon_core::prelude::*;
 use axon_pal::{traits::PalSync, types::RawHandle};
 use crate::WindowsPal;

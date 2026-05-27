@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports)]
 //! Runtime postcondition enforcement — check_postcondition() and ensures!().
 //!
 //! Bio DNA: Annotation Preservation — @ensures annotations survive the

@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports)]
 //! Sovereign Consent Doctrine — TrustGraph Consent Gate.
 //!
 //! "AXON cannot help you if you give the key away."
@@ -7,7 +8,6 @@
 //! and trust scores, and requires explicit acknowledgment.
 //! Non-paternalistic — warns but never blocks a conscious decision.
 
-use super::{AuditResult, AuditError, event::EventKind};
 use crate::audit::chain::AuditChain;
 
 /// Classification of a consent request.

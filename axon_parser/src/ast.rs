@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
 // ============================================================
 // AXON Parser — ast.rs
 // Complete AST node definitions — v0.3

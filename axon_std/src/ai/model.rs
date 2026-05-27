@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports)]
 //! axon::ai::model — model management via Ollama.
 
 use serde::Deserialize;

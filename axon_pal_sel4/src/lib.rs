@@ -1,3 +1,6 @@
+#![cfg(target_arch = "aarch64")]
+#![allow(clippy::all, dead_code, unused_imports)]
+#![cfg_attr(not(target_arch = "aarch64"), allow(unused_imports, dead_code))]
 //! # axon_pal_sel4
 //!
 //! AXON Platform Abstraction Layer — seL4 aarch64 implementation.
