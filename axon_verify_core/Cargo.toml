@@ -1,0 +1,13 @@
+[package]
+name        = "axon_verify_core"
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+description = "AXON constitutional verification kernel — Kani + Why3/Z3 verified"
+repository  = "https://github.com/aieonyx/AXON"
+
+# CONSTITUTIONAL RULE: zero external dependencies. Any change requires new proof.
+[dependencies]
+
+[dev-dependencies]

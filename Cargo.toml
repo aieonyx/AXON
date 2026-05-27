@@ -9,6 +9,7 @@ members = [
     "axon_pal_macos",
     "axon_pal_windows",
     "axon_integration",
+    "axon_verify_core",
     "axon_lexer",
     "axon_parser",
     "axon_codegen",
