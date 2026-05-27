@@ -86,3 +86,7 @@ pub mod ai;
 /// axon::verify — runtime formal verification.
 /// @ensures postconditions, contract cache, DWC, DVG, QCC.
 pub mod verify;
+
+// ── axon.audit (SL-08) ────────────────────────────────────────
+/// axon::audit — hash-chained audit trail, Sovereign Consent Doctrine.
+pub mod audit;
