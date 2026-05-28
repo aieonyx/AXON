@@ -1,3 +1,5 @@
+mod dvg;
+use dvg::DVGPass;
 // ============================================================
 // AXON CLI — main.rs
 // Commands: axon version | axon check | axon build | axon run
@@ -10,8 +12,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use axon_lexer::FileId;
-use axon_ai;
-use axon_llvm;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -23,6 +23,7 @@ fn main() {
         "verify"  => cmd_verify(&args),
         "suggest" => cmd_suggest(&args),
         "build"   => cmd_build(&args),
+        "deploy"  => cmd_deploy(&args),
         "run"     => cmd_run(&args),
         other => {
             eprintln!("axon: unknown command '{}'", other);
@@ -508,6 +509,7 @@ fn find_axon_root() -> String {
     format!("{}/axon", home)
 }
 
+#[allow(dead_code)]
 fn dirs_home() -> PathBuf {
     env::var("HOME").map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/home/edisonbl"))
@@ -518,4 +520,20 @@ fn read_file(path: &str) -> String {
         eprintln!("axon: cannot read '{}': {}", path, e);
         std::process::exit(1);
     })
+}
+
+fn cmd_deploy(args:&[String]){
+    let file=args.get(2).map(|s|s.as_str()).unwrap_or_else(||{
+        eprintln!("Usage: axon deploy <file.axon>");
+        std::process::exit(1);
+    });
+    let source=std::fs::read_to_string(file).unwrap_or_else(|e|{
+        eprintln!("Error reading {}: {}",file,e);
+        std::process::exit(1);
+    });
+    let report=DVGPass::run(&source,file);
+    print!("{}",report.format());
+    if !report.all_passed(){
+        std::process::exit(1);
+    }
 }

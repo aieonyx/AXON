@@ -8,6 +8,7 @@
 //! and trust scores, and requires explicit acknowledgment.
 //! Non-paternalistic — warns but never blocks a conscious decision.
 
+use crate::audit::{AuditResult, AuditError, event::EventKind};
 use crate::audit::chain::AuditChain;
 
 /// Classification of a consent request.
