@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code, unused_imports, unused_variables)]
 // ============================================================
 // axon_llvm — lib.rs
 // AXON LLVM Native Backend — Phase 4
