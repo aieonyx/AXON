@@ -1,3 +1,4 @@
+pub mod dwc;
 // ============================================================
 // AXON Codegen — lib.rs
 // AXON → Rust Transpiler — Phase 3

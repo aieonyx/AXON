@@ -1,3 +1,4 @@
+#![allow(clippy::all)]
 // ============================================================
 // AXON Codegen — generator.rs
 // Main transpiler — walks AST, emits Rust source
@@ -19,16 +20,12 @@ use std::collections::HashMap;
 use axon_parser::ast::{
     Program, TopLevelItem,
     StructDecl, EnumDecl, VariantDecl,
-    FieldDecl,
     FnDecl, TaskDecl, Param,
     Block, Stmt,
-    LetStmt, MutStmt, EphemeralStmt,
-    ReturnStmt, IfStmt, ForStmt, WhileStmt,
-    MatchStmt, MatchArm, DeferStmt,
-    AssignStmt, ExprStmt,
+    LetStmt, IfStmt, ForStmt, MatchStmt, MatchArm,
     Expr, Literal,
     Pattern, EnumPattern, PatternField,
-    Type, MemMode,
+    MemMode,
 };
 use crate::types::rust_type;
 use crate::apr::{APR, APRStatus};
@@ -63,7 +60,7 @@ impl CodeGen {
 
     // ── Output helpers ────────────────────────────────────────
 
-    fn line(&mut self, s: &str) {
+    pub(crate) fn line(&mut self, s: &str) {
         let indent = "    ".repeat(self.indent);
         self.output.push_str(&indent);
         self.output.push_str(s);
@@ -72,9 +69,10 @@ impl CodeGen {
 
     pub fn blank(&mut self) { self.output.push('\n'); }
 
-    fn indent(&mut self)   { self.indent += 1; }
-    fn dedent(&mut self)   { if self.indent > 0 { self.indent -= 1; } }
+    pub(crate) fn indent(&mut self)   { self.indent += 1; }
+    pub(crate) fn dedent(&mut self)   { if self.indent > 0 { self.indent -= 1; } }
 
+    #[allow(dead_code)]
     fn raw(&mut self, s: &str) { self.output.push_str(s); }
 
     // ── Program ───────────────────────────────────────────────
@@ -250,6 +248,7 @@ impl CodeGen {
     // ── Fn → Rust fn ─────────────────────────────────────────
 
     pub fn emit_fn(&mut self, f: &FnDecl) {
+        if !f.contracts.is_empty() { return self.emit_fn_with_dwc(f); }
         let fn_name = f.name.name.clone();
         for d in &f.decorators {
             let name = d.name.iter()
@@ -333,7 +332,7 @@ impl CodeGen {
         self.line("}");
     }
 
-    fn emit_params(&self, params: &[Param]) -> String {
+    pub(crate) fn emit_params(&self, params: &[Param]) -> String {
         params.iter().map(|p| {
             let ty   = rust_type(&p.ty);
             let mode = match &p.mem_mode {
@@ -348,7 +347,7 @@ impl CodeGen {
 
     // ── Block → Rust block body ───────────────────────────────
 
-    fn emit_block(&mut self, block: &Block) {
+    pub(crate) fn emit_block(&mut self, block: &Block) {
         for stmt in &block.stmts {
             self.emit_stmt(stmt);
         }
