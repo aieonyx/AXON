@@ -1,3 +1,4 @@
+pub mod sec;
 // ============================================================
 // AXON Parser — axon_parser/src/lib.rs
 // Copyright © 2026 Edison Lepiten — AIEONYX
