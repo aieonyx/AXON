@@ -32,6 +32,7 @@ pub mod ibi;
 pub mod sfl;
 pub mod qcc;
 pub mod ocu;
+pub mod aipl;
 pub mod spec;
 pub mod translator;
 pub mod verifier;
@@ -44,6 +45,7 @@ pub use verifier::{ConstraintVerifier, VerificationResult, VerificationStatus, A
 pub use constraint_parser::{extract_spec, has_formal_spec, expr_to_constraint, expr_to_effect, parse_constraint_string};
 pub use error::{AiError, ConstraintViolation};
 pub use qcc::{QCCAnalyser,QCCReport,ContractContradiction};
+pub use aipl::{AIPLScanner,AIPLReport,PatternMatch,PatternCategory,Severity,AIPL_VERSION};
 pub use ocu::{OCURegistry,ObserverUnit,OCUEvent};
 pub use sfl::{SFLAnalyser,SemanticFrame,CapContext,TrustLevel,FrameShiftViolation};
 pub use ibi::{ImmortalInvariantRegistry,ImmortalBoundaryInvariant,IBITier,IBIViolation,IBIViolationKind};
