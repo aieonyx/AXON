@@ -164,3 +164,5 @@ mod gap_tests {
         assert!(summary.contains("Rules checked"));
     }
 }
+
+pub mod lexer;
