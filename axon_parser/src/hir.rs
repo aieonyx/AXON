@@ -231,7 +231,9 @@ pub enum HirStmtKind {
     Expr(HirExpr),
     StorageLive(PlaceId),
     StorageDead(PlaceId),
-    DropElaborated(PlaceId),                       // 7E-5 invariant
+    // KNOWN-GAP H5: DropElaborated nodes are not yet emitted by the HIR lowerer.
+    // Deferred to Stage 8C (borrow checker). 7E-5 invariant: only emit when needs_drop() is true.
+    DropElaborated(PlaceId),
 }
 
 // ============================================================
@@ -393,6 +395,8 @@ impl HirLowerer {
         HirModule { items: hir_items, errors: self.errors }
     }
 
+    /// fresh_place() is module-scoped — counter persists for entire HirModule lowering.
+    /// H1 FIX: PlaceIds are guaranteed unique across all functions in a module.
     fn fresh_place(&mut self) -> PlaceId {
         let id = PlaceId(self.next_place);
         self.next_place += 1;
@@ -494,6 +498,9 @@ impl HirLowerer {
     }
 
     fn lower_fn(&mut self, sig: FnSig, body: Expr) -> HirFn {
+        // H8 KNOWN-GAP: Complex parameter patterns (e.g. fn f((x,y): (i32,i32)))
+        // are not yet destructured — only a single PlaceId per param is allocated.
+        // Full destructuring support targeted for Stage 8C.
         let params = sig.params.iter().map(|p| {
             let place = self.fresh_place();
             (place, self.lower_ty(&p.ty))
@@ -673,13 +680,16 @@ impl HirLowerer {
                 HirExprKind::Path(segs.into_iter().map(|s| s.name).collect())
             }
             Expr::Range(_, _, _, _) => {
-                // Range lowered as a struct construction — placeholder for 8B
+                // DEFERRED H6: Range lowering not yet implemented.
+                // Placeholder unit literal used until Stage 8B.
+                // WARNING: For loops over ranges will not work correctly until 8B.
                 HirExprKind::Lit(HirLit::Unit)
             }
             _ => HirExprKind::Lit(HirLit::Unit),
         };
         HirExpr {
             kind,
+            // H7: HirTy::Infer is a type hole — will be filled by Stage 8B type inference.
             ty: HirTy::Infer,
             span,
             node_id,
@@ -791,7 +801,16 @@ impl HirLowerer {
                 ContractExpr::UnOp(ContractUnOp::Not, Box::new(self.lower_contract_expr(inner))),
             Expr::Unary(UnaryOp::Neg, inner, _) =>
                 ContractExpr::UnOp(ContractUnOp::Neg, Box::new(self.lower_contract_expr(inner))),
-            _ => ContractExpr::True,
+            _ => {
+                // H4 FIX: Never silently accept unrecognised contract expressions.
+                // A fallback to True would give false verification guarantees.
+                // Emit an error and return False (unsatisfiable) so verification fails loudly.
+                self.errors.push(HirError {
+                    msg: "contract expression contains unsupported syntax; verification will fail".into(),
+                    span: Span::new(0, 0),
+                });
+                ContractExpr::False
+            }
         }
     }
 

@@ -177,10 +177,10 @@ impl std::fmt::Display for ParseError {
     }
 }
 
-pub struct Parser { tokens: Vec<Token>, pos: usize, allow_struct_lit: bool }
+pub struct Parser { tokens: Vec<Token>, pos: usize, allow_struct_lit: bool, expr_depth: usize }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self { Parser { tokens, pos: 0, allow_struct_lit: true } }
+    pub fn new(tokens: Vec<Token>) -> Self { Parser { tokens, pos: 0, allow_struct_lit: true, expr_depth: 0 } }
     pub fn from_source(src: &str) -> Result<Self, LexError> {
         Ok(Parser::new(Lexer::new(src).tokenize()?))
     }
@@ -732,7 +732,22 @@ impl Parser {
             ))
         }
     }
-    fn parse_expr(&mut self) -> Result<Expr, ParseError> { self.parse_assign_expr() }
+    /// Maximum expression nesting depth — prevents stack overflow on pathological input (S2).
+    const MAX_EXPR_DEPTH: usize = 256;
+
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.expr_depth += 1;
+        if self.expr_depth > Self::MAX_EXPR_DEPTH {
+            self.expr_depth -= 1;
+            return Err(ParseError::new(
+                format!("expression nested too deeply (max depth {})", Self::MAX_EXPR_DEPTH),
+                self.current_span(),
+            ));
+        }
+        let result = self.parse_assign_expr();
+        self.expr_depth -= 1;
+        result
+    }
     fn parse_assign_expr(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.parse_range_expr()?;
         let span = self.current_span();
