@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="assets/axon-banner.png" alt="AxonBanner">
+
 # AXON — Sovereign Systems Programming Language
 
 > *"We are not users. We are not accounts. We are not products. We are people."*
