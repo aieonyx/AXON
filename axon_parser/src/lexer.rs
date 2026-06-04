@@ -56,7 +56,17 @@ impl std::fmt::Display for LexError {
 pub struct Lexer<'src> { src: &'src str, bytes: &'src [u8], pos: usize }
 impl<'src> Lexer<'src> {
     pub fn new(src: &'src str) -> Self { Lexer { src, bytes: src.as_bytes(), pos: 0 } }
+    /// Maximum source size: 10 MB. Prevents OOM DoS on malicious input.
+    pub const MAX_SOURCE_BYTES: usize = 10 * 1024 * 1024;
+
     pub fn tokenize(mut self) -> Result<Vec<Token>, LexError> {
+        // S1: Input size guard
+        if self.src.len() > Self::MAX_SOURCE_BYTES {
+            return Err(LexError::new(
+                format!("source too large: {} bytes (max {})", self.src.len(), Self::MAX_SOURCE_BYTES),
+                0, self.src.len(),
+            ));
+        }
         let mut tokens = Vec::new();
         loop {
             self.skip_ws(&mut tokens)?;
