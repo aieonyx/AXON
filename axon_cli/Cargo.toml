@@ -1,24 +1,14 @@
 [package]
 name        = "axon_cli"
-version     = "0.1.0"
+version     = "0.8.0"
 edition     = "2021"
-description = "AXON compiler CLI — axon build, check, fmt, audit"
+description = "AXON compiler CLI — Phase 8"
 authors     = ["Edison Lepiten <aieonyx>"]
-license     = "SEE LICENSE FILE"
+license     = "Apache-2.0"
 
 [[bin]]
 name = "axon"
 path = "src/main.rs"
 
 [dependencies]
-axon_lexer   = { path = "../axon_lexer"   }
-axon_parser  = { path = "../axon_parser"  }
-axon_codegen = { path = "../axon_codegen" }
-axon_ai      = { path = "../axon_ai"      }
-axon_llvm    = { path = "../axon_llvm"    }
-axon_rt      = { path = "../axon_rt"      }
-axon_std     = { path = "../axon_std"     }
-
-
-[features]
-default = []
+axon_parser = { path = "../axon_parser" }
