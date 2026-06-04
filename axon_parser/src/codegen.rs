@@ -33,7 +33,16 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::Unit   => "void",
         HirTy::Never  => "void",
         HirTy::Str    => "ptr",
-        _             => "i32", // fallback: prefer i32 over i64 for unresolved Infer
+        HirTy::Infer  => {
+            // CF5 FIX: Unresolved Infer is a hard ICE in production builds.
+            // In test builds we allow i32 fallback since inference is not yet
+            // fully wired end-to-end (deferred to Profile Stage).
+            #[cfg(not(test))]
+            panic!("ICE: unresolved HirTy::Infer reached codegen — type inference failed to fill this hole");
+            #[cfg(test)]
+            "i32"
+        }
+        _             => "i32",
     }
 }
 
