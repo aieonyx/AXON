@@ -733,6 +733,8 @@ impl Parser {
         }
     }
     /// Maximum expression nesting depth — prevents stack overflow on pathological input (S2).
+    /// SEC2-WARN: 256 may still be exploitable on small stacks. Consider 128 before production.
+    /// A stress test with 200-level nesting should be added before Profile Stage 1.0.
     const MAX_EXPR_DEPTH: usize = 256;
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
