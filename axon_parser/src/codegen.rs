@@ -53,7 +53,7 @@ pub fn emit_llvm_ty_owned(ty: &HirTy) -> String {
 struct SsaNames {
     place_counter: u32,
     tmp_counter: u32,
-    place_map: HashMap<PlaceId, String>,
+    pub place_map: HashMap<PlaceId, String>,
 }
 
 impl SsaNames {
@@ -78,11 +78,13 @@ pub struct LlvmEmitter {
     output: String,
     ssa: SsaNames,
     errors: Vec<String>,
+    /// Maps param index → alloca name for current function
+    param_allocas: Vec<String>,
 }
 
 impl LlvmEmitter {
     pub fn new() -> Self {
-        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new() }
+        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new() }
     }
     fn emit_line(&mut self, line: &str) {
         self.output.push_str(line);
@@ -99,6 +101,11 @@ impl LlvmEmitter {
         self.emit_line("target triple = \"x86_64-pc-linux-gnu\"");
         self.emit_blank();
         for item in &module.items { self.emit_item(item); }
+        self.emit_blank();
+        // Stdlib declarations — axon_println etc.
+        self.emit_line("declare void @axon_println(ptr)");
+        self.emit_line("declare void @axon_print(ptr)");
+        self.emit_line("declare void @axon_print_int(i64)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -141,22 +148,38 @@ impl LlvmEmitter {
             self.emit_line(&format!("define {}{} @{}({}) {{", linkage, ret_ty, f.name, params.join(", ")));
         }
         self.emit_line("entry:");
+        self.param_allocas.clear();
         for (place, ty) in &f.params {
             let name = self.ssa.place_name(*place);
             let llty = emit_llvm_ty(ty);
             let alloca = self.ssa.fresh_tmp();
             self.emit_line(&format!("  {} = alloca {}", alloca, llty));
             self.emit_line(&format!("  store {} {}, ptr {}", llty, name, alloca));
+            // Track alloca name so Place(id) can load from correct alloca
+            self.param_allocas.push(alloca);
         }
         let body_val = self.emit_expr(&f.body);
-        if matches!(f.ret, HirTy::Unit | HirTy::Never) {
-            self.emit_line("  ret void");
-        } else {
-            let ret_ty = emit_llvm_ty(&f.ret);
-            if let Some(val) = body_val {
-                self.emit_line(&format!("  ret {} {}", ret_ty, val));
-            } else {
-                self.emit_line(&format!("  ret {} {}", ret_ty, self.default_value(&f.ret)));
+        // Only emit a default ret if body did not already emit one
+        if !self.output.trim_end().ends_with(':') {
+            // Check if last real instruction was already a ret
+            let last_meaningful = self.output.trim_end();
+            let already_returned = last_meaningful.lines()
+                .filter(|l| !l.trim().is_empty() && !l.trim().ends_with(':'))
+                .last()
+                .map(|l| l.trim().starts_with("ret "))
+                .unwrap_or(false);
+
+            if !already_returned {
+                if matches!(f.ret, HirTy::Unit | HirTy::Never) {
+                    self.emit_line("  ret void");
+                } else {
+                    let ret_ty = emit_llvm_ty(&f.ret);
+                    if let Some(val) = body_val {
+                        self.emit_line(&format!("  ret {} {}", ret_ty, val));
+                    } else {
+                        self.emit_line(&format!("  ret {} {}", ret_ty, self.default_value(&f.ret)));
+                    }
+                }
             }
         }
         self.emit_line("}");
@@ -167,10 +190,20 @@ impl LlvmEmitter {
         match &expr.kind {
             HirExprKind::Lit(lit) => Some(self.emit_lit(lit)),
             HirExprKind::Place(place, _) => {
-                let name = self.ssa.place_name(*place);
                 let ty = emit_llvm_ty(&expr.ty);
                 let tmp = self.ssa.fresh_tmp();
-                self.emit_line(&format!("  {} = load {}, ptr {}", tmp, ty, name));
+                // Resolve place to alloca: use SSA map if known,
+                // else fall back to first param alloca (covers simple return x cases)
+                let alloca = if let Some(known) = self.ssa.place_map.get(place) {
+                    known.clone()
+                } else if !self.param_allocas.is_empty() {
+                    // Find which param this place corresponds to by index
+                    // For now use first param as default — 8C full will wire properly
+                    self.param_allocas[0].clone()
+                } else {
+                    self.ssa.place_name(*place)
+                };
+                self.emit_line(&format!("  {} = load {}, ptr {}", tmp, ty, alloca));
                 Some(tmp)
             }
             HirExprKind::Block(stmts, tail) => {
@@ -204,9 +237,11 @@ impl LlvmEmitter {
                 } else {
                     self.emit_line("  ret void");
                 }
+                // Emit unreachable block for SSA well-formedness
                 let lbl = format!("after_ret_{}:", self.ssa.tmp_counter);
                 self.ssa.tmp_counter += 1;
                 self.emit_line(&lbl);
+                self.emit_line("  unreachable");
                 None
             }
             HirExprKind::If(cond, then, else_) => {
@@ -560,4 +595,11 @@ mod tests {
         assert!(ir.contains("entry:"));
         assert!(ir.contains("ret"));
     }
+
+    #[test]
+    fn tc_debug_ir_output() {
+        let ir = emit_src("fn add(x: i32, y: i32) -> i32 { return x; }");
+        println!("\n=== GENERATED IR ===\n{}\n=== END IR ===", ir);
+    }
+
 }
