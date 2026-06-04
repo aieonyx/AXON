@@ -80,11 +80,13 @@ pub struct LlvmEmitter {
     errors: Vec<String>,
     /// Maps param index → alloca name for current function
     param_allocas: Vec<String>,
+    /// Set to true when a ret instruction has been emitted in current fn
+    fn_returned: bool,
 }
 
 impl LlvmEmitter {
     pub fn new() -> Self {
-        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new() }
+        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false }
     }
     fn emit_line(&mut self, line: &str) {
         self.output.push_str(line);
@@ -141,7 +143,8 @@ impl LlvmEmitter {
             format!("{} {}", emit_llvm_ty(ty), name)
         }).collect();
         let ret_ty = emit_llvm_ty(&f.ret);
-        let linkage = if f.is_pub { "" } else { "internal " };
+        // main() is always public — linker requires it
+        let linkage = if f.name == "main" || f.is_pub { "" } else { "internal " };
         if matches!(f.ret, HirTy::Unit | HirTy::Never) {
             self.emit_line(&format!("define {}void @{}({}) {{", linkage, f.name, params.join(", ")));
         } else {
@@ -159,26 +162,17 @@ impl LlvmEmitter {
             self.param_allocas.push(alloca);
         }
         let body_val = self.emit_expr(&f.body);
-        // Only emit a default ret if body did not already emit one
-        if !self.output.trim_end().ends_with(':') {
-            // Check if last real instruction was already a ret
-            let last_meaningful = self.output.trim_end();
-            let already_returned = last_meaningful.lines()
-                .filter(|l| !l.trim().is_empty() && !l.trim().ends_with(':'))
-                .last()
-                .map(|l| l.trim().starts_with("ret "))
-                .unwrap_or(false);
-
-            if !already_returned {
-                if matches!(f.ret, HirTy::Unit | HirTy::Never) {
-                    self.emit_line("  ret void");
+        // Only emit a default ret if body did not already emit one.
+        // We track this via a flag set when Return is emitted.
+        if !self.fn_returned {
+            if matches!(f.ret, HirTy::Unit | HirTy::Never) {
+                self.emit_line("  ret void");
+            } else {
+                let ret_ty = emit_llvm_ty(&f.ret);
+                if let Some(val) = body_val {
+                    self.emit_line(&format!("  ret {} {}", ret_ty, val));
                 } else {
-                    let ret_ty = emit_llvm_ty(&f.ret);
-                    if let Some(val) = body_val {
-                        self.emit_line(&format!("  ret {} {}", ret_ty, val));
-                    } else {
-                        self.emit_line(&format!("  ret {} {}", ret_ty, self.default_value(&f.ret)));
-                    }
+                    self.emit_line(&format!("  ret {} {}", ret_ty, self.default_value(&f.ret)));
                 }
             }
         }
@@ -237,6 +231,8 @@ impl LlvmEmitter {
                 } else {
                     self.emit_line("  ret void");
                 }
+                // Mark fn as returned — suppresses default ret at fn end
+                self.fn_returned = true;
                 // Emit unreachable block for SSA well-formedness
                 let lbl = format!("after_ret_{}:", self.ssa.tmp_counter);
                 self.ssa.tmp_counter += 1;
@@ -600,6 +596,31 @@ mod tests {
     fn tc_debug_ir_output() {
         let ir = emit_src("fn add(x: i32, y: i32) -> i32 { return x; }");
         println!("\n=== GENERATED IR ===\n{}\n=== END IR ===", ir);
+    }
+
+    #[test]
+    fn tc_e2e_return_42() {
+        // Full end-to-end: AXON source -> binary -> run -> check exit code
+        let ir = emit_src("fn main() -> i32 { return 42; }");
+        println!("IR:\n{}", ir);
+        match ir_to_object(&ir, "/tmp") {
+            Ok(obj_path) => {
+                match object_to_binary(&obj_path, "/tmp/axon_e2e_42") {
+                    Ok(()) => {
+                        // Run the binary and check exit code
+                        let status = std::process::Command::new("/tmp/axon_e2e_42")
+                            .status()
+                            .expect("failed to run binary");
+                        println!("Exit code: {}", status.code().unwrap_or(-1));
+                        assert_eq!(status.code(), Some(42),
+                            "expected exit code 42, got {:?}", status.code());
+                        println!("SUCCESS: fn main() -> i32 {{ return 42; }} compiled and ran correctly");
+                    }
+                    Err(e) => panic!("link failed: {}", e),
+                }
+            }
+            Err(e) => panic!("compile failed: {}", e),
+        }
     }
 
 }
