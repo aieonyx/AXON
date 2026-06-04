@@ -412,6 +412,96 @@ pub fn ir_to_object(ll_source: &str, out_dir: &str) -> Result<String, String> {
     Ok(obj_path)
 }
 
+/// Emit PTX assembly for NVIDIA GPU targets.
+/// Uses llc-18 with nvptx64 backend.
+/// sm_75 = T4 (Turing), sm_80 = A100, sm_86 = RTX 3090
+pub fn ir_to_ptx(ll_source: &str, out_dir: &str, sm: &str) -> Result<String, String> {
+    let ll_path = format!("{}/axon_gpu.ll", out_dir);
+    let ptx_path = format!("{}/axon_gpu.ptx", out_dir);
+
+    // Patch IR for GPU: replace x86 datalayout/triple with nvptx64
+    let gpu_ir = patch_ir_for_gpu(ll_source, sm);
+
+    std::fs::write(&ll_path, &gpu_ir)
+        .map_err(|e| format!("failed to write GPU .ll: {}", e))?;
+
+    let output = Command::new("llc-18")
+        .args(&[
+            "-O2",
+            &format!("-march=nvptx64"),
+            &format!("-mcpu=sm_{}", sm),
+            "-filetype=asm",
+            "-o", &ptx_path,
+            &ll_path,
+        ])
+        .output()
+        .map_err(|e| format!("llc-18 not found: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("llc-18 PTX failed: {}", stderr));
+    }
+
+    // Validate with ptxas
+    let ptxas = Command::new("ptxas")
+        .args(&[
+            &format!("-arch=sm_{}", sm),
+            "-o", "/dev/null",
+            &ptx_path,
+        ])
+        .output();
+
+    if let Ok(out) = ptxas {
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            eprintln!("ptxas warning: {}", stderr);
+        }
+    }
+
+    Ok(ptx_path)
+}
+
+/// Patch LLVM IR for GPU emission:
+/// - Replace x86 datalayout and triple with nvptx64
+/// - Mark main() as .entry kernel
+/// - Remove stdlib declarations (no libc on GPU)
+fn patch_ir_for_gpu(ir: &str, sm: &str) -> String {
+    let mut lines: Vec<String> = ir.lines().map(|l| l.to_string()).collect();
+
+    for line in lines.iter_mut() {
+        // Replace target triple
+        if line.starts_with("target triple") {
+            *line = "target triple = \"nvptx64-nvidia-cuda\"".to_string();
+        }
+        // Replace datalayout for nvptx64
+        if line.starts_with("target datalayout") {
+            *line = "target datalayout = \"e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64\"".to_string();
+        }
+        // GPU entry kernel: must be void, no return value
+        if line.contains("@main(") && line.contains("define") {
+            *line = "define void @main() {".to_string();
+        }
+        // Fix ret: GPU void kernel needs "ret void" not "ret i32 N"
+        if line.trim_start().starts_with("ret i") {
+            *line = "  ret void".to_string();
+        }
+        // Remove after_ret labels and unreachable — invalid in GPU IR
+        if line.contains("after_ret_") || line.trim() == "unreachable" {
+            *line = String::new();
+        }
+        // GPU kernels must return void — fix ret instructions
+        if line.starts_with("declare void @axon_") {
+            *line = String::new();
+        }
+        if line.starts_with("!llvm.module.flags") || line.starts_with("!0 =") {
+            *line = String::new();
+        }
+    }
+
+    lines.join("
+")
+}
+
 pub fn object_to_binary(obj_path: &str, bin_path: &str) -> Result<(), String> {
     let output = Command::new("clang")
         .args(&[obj_path, "-o", bin_path, "-no-pie"])

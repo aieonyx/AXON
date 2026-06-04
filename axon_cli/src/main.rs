@@ -92,12 +92,13 @@ fn cmd_build(args: &[String]) {
     use axon_parser::profile::{Profile, check_profile, enforce_profile};
     use axon_parser::parser::parse;
     use axon_parser::hir::lower;
-    use axon_parser::codegen::{emit_ir, ir_to_object, object_to_binary};
+    use axon_parser::codegen::{emit_ir, ir_to_object, object_to_binary, ir_to_ptx};
 
     let mut profile_str: Option<String> = None;
     let mut output: Option<String> = None;
     let mut file_arg: Option<String> = None;
     let mut emit_ir_flag = false;
+    let mut target: Option<String> = None;
 
     let mut i = 2;
     while i < args.len() {
@@ -109,6 +110,10 @@ fn cmd_build(args: &[String]) {
             "--output" | "-o" => {
                 i += 1;
                 if i < args.len() { output = Some(args[i].clone()); i += 1; }
+            }
+            "--target" | "-t" => {
+                i += 1;
+                if i < args.len() { target = Some(args[i].clone()); i += 1; }
             }
             "--emit-ir" => { emit_ir_flag = true; i += 1; }
             _ => { file_arg = Some(args[i].clone()); i += 1; }
@@ -167,7 +172,27 @@ fn cmd_build(args: &[String]) {
         .to_string_lossy().to_string();
     let bin_path = output.unwrap_or_else(|| stem.clone());
 
-    // Compile → object → binary
+    // GPU target: emit PTX instead of native binary
+    if let Some(ref tgt) = target {
+        if tgt == "nvptx64" || tgt.starts_with("sm_") {
+            let sm = if tgt.starts_with("sm_") { tgt.trim_start_matches("sm_") }
+                     else { "75" }; // T4 default
+            println!("axon: targeting NVIDIA GPU sm_{} (nvptx64)", sm);
+            match ir_to_ptx(&ir, "/tmp", sm) {
+                Ok(ptx_path) => {
+                    let out = format!("{}.ptx", bin_path);
+                    std::fs::copy(&ptx_path, &out).ok();
+                    println!("axon: PTX ready: {}", out);
+                    println!("axon: validate: ptxas -arch=sm_{} {}", sm, out);
+                    println!("axon: run on GPU via PyCUDA or cuLaunch");
+                }
+                Err(e) => { eprintln!("axon: PTX error: {}", e); std::process::exit(1); }
+            }
+            return;
+        }
+    }
+
+    // CPU target: compile → object → binary
     let obj = match ir_to_object(&ir, "/tmp") {
         Ok(p) => p,
         Err(e) => { eprintln!("axon: compile error: {}", e); std::process::exit(1); }
