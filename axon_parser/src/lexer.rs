@@ -23,7 +23,7 @@ impl Token {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Fn, Trait, Impl, Struct, Enum, Type, Let, Mut, Const,
-    If, Else, While, Loop, For, In, Return, Match, Use,
+    If, Else, While, Loop, For, In, Return, Break, Continue, Match, Use,
     Pub, Mod, SelfVal, SelfType, Super, Where, As, Move,
     Sovereign, Capability, Profile, Patchable,
     Requires, Ensures, Invariant, Ghost, Pure, UnsafeAxon,
@@ -254,7 +254,7 @@ fn kw_or_ident(word: &str) -> TokenKind {
         "let"=>TokenKind::Let,"mut"=>TokenKind::Mut,"const"=>TokenKind::Const,
         "if"=>TokenKind::If,"else"=>TokenKind::Else,"while"=>TokenKind::While,
         "loop"=>TokenKind::Loop,"for"=>TokenKind::For,"in"=>TokenKind::In,
-        "return"=>TokenKind::Return,"match"=>TokenKind::Match,"use"=>TokenKind::Use,
+        "return"=>TokenKind::Return,"break"=>TokenKind::Break,"continue"=>TokenKind::Continue,"match"=>TokenKind::Match,"use"=>TokenKind::Use,
         "pub"=>TokenKind::Pub,"mod"=>TokenKind::Mod,"self"=>TokenKind::SelfVal,
         "Self"=>TokenKind::SelfType,"super"=>TokenKind::Super,"where"=>TokenKind::Where,
         "as"=>TokenKind::As,"move"=>TokenKind::Move,
