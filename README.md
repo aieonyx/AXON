@@ -34,7 +34,11 @@ axon build --profile sovereign-offline -o add add.axon
 axon build --profile sovereign-offline --target nvptx64 -o kernel kernel.axon
 # → produces kernel.ptx, validated by ptxas
 ```
-
+```
+fn main() -> i32 { let x: i32 = 20; let y: i32 = 22; return x + y; }
+→ Compiles and runs: exit code 42
+→ Pipeline: AXON → LLVM 18 → native binary
+```
 ---
 
 ## Benchmark Results
@@ -42,8 +46,22 @@ axon build --profile sovereign-offline --target nvptx64 -o kernel kernel.axon
 ### CPU — x86_64 (Pop OS, AMD Ryzen 7)
 
 ### GPU — NVIDIA T4 (Google Colab)
----
 
+<p align="center">
+  <img src="assets/junebenchmark.png" alt="AxonBenchmark">
+    ---
+
+
+RESULT**:
+
+- Vector addition: 1,000,000 elements × 20 runs
+- Throughput:      16.64 billion ops/sec
+- Correctness:     True (verified)
+- Pipeline:        AXON → LLVM 18 → PTX → NVIDIA T4 (sm_75)
+
+
+    
+---
 ## Capability Profiles
 
 Every AXON program compiles under a sovereign capability profile.
