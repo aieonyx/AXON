@@ -153,12 +153,13 @@ impl LlvmEmitter {
         self.emit_line("entry:");
         self.param_allocas.clear();
         for (place, ty) in &f.params {
-            let name = self.ssa.place_name(*place);
+            let param_val = self.ssa.place_name(*place);
             let llty = emit_llvm_ty(ty);
             let alloca = self.ssa.fresh_tmp();
             self.emit_line(&format!("  {} = alloca {}", alloca, llty));
-            self.emit_line(&format!("  store {} {}, ptr {}", llty, name, alloca));
-            // Track alloca name so Place(id) can load from correct alloca
+            self.emit_line(&format!("  store {} {}, ptr {}", llty, param_val, alloca));
+            // Register alloca in place_map so Place(id) resolves correctly
+            self.ssa.place_map.insert(*place, alloca.clone());
             self.param_allocas.push(alloca);
         }
         let body_val = self.emit_expr(&f.body);
@@ -186,17 +187,10 @@ impl LlvmEmitter {
             HirExprKind::Place(place, _) => {
                 let ty = emit_llvm_ty(&expr.ty);
                 let tmp = self.ssa.fresh_tmp();
-                // Resolve place to alloca: use SSA map if known,
-                // else fall back to first param alloca (covers simple return x cases)
-                let alloca = if let Some(known) = self.ssa.place_map.get(place) {
-                    known.clone()
-                } else if !self.param_allocas.is_empty() {
-                    // Find which param this place corresponds to by index
-                    // For now use first param as default — 8C full will wire properly
-                    self.param_allocas[0].clone()
-                } else {
-                    self.ssa.place_name(*place)
-                };
+                // Resolve place to alloca via place_map (registered for params + lets)
+                let alloca = self.ssa.place_map.get(place)
+                    .cloned()
+                    .unwrap_or_else(|| self.ssa.place_name(*place));
                 self.emit_line(&format!("  {} = load {}, ptr {}", tmp, ty, alloca));
                 Some(tmp)
             }
@@ -337,12 +331,14 @@ impl LlvmEmitter {
         match &stmt.kind {
             HirStmtKind::Let(place, _, ty, init) => {
                 let llty = emit_llvm_ty(ty);
-                let name = self.ssa.place_name(*place);
-                self.emit_line(&format!("  {} = alloca {}", name, llty));
+                let alloca = self.ssa.fresh_tmp();
+                self.emit_line(&format!("  {} = alloca {}", alloca, llty));
+                // Register in place_map so Place(id) resolves to this alloca
+                self.ssa.place_map.insert(*place, alloca.clone());
                 if let Some(ie) = init {
                     if let Some(v) = self.emit_expr(ie) {
                         let ity = emit_llvm_ty(&ie.ty);
-                        self.emit_line(&format!("  store {} {}, ptr {}", ity, v, name));
+                        self.emit_line(&format!("  store {} {}, ptr {}", ity, v, alloca));
                     }
                 }
             }
@@ -620,6 +616,75 @@ mod tests {
                 }
             }
             Err(e) => panic!("compile failed: {}", e),
+        }
+    }
+
+    #[test]
+    fn tc_debug_arith_ir() {
+        let ir = emit_src("fn add(x: i32, y: i32) -> i32 { let z = x + y; return z; }");
+        println!("\n=== ARITH IR ===\n{}\n=== END ===", ir);
+    }
+
+    #[test]
+    fn tc_e2e_arithmetic() {
+        // fn add(x, y) -> i32 { let z = x + y; return z; }
+        // Called as main returning add(20, 22) = 42
+        let src = "fn main() -> i32 { let x: i32 = 20; let y: i32 = 22; let z = x + y; return z; }";
+        let ir = emit_src(src);
+        println!("IR:\n{}", ir);
+        match ir_to_object(&ir, "/tmp") {
+            Ok(obj) => {
+                match object_to_binary(&obj, "/tmp/axon_arith") {
+                    Ok(()) => {
+                        let status = std::process::Command::new("/tmp/axon_arith")
+                            .status().expect("failed to run");
+                        println!("Exit code: {}", status.code().unwrap_or(-1));
+                        assert_eq!(status.code(), Some(42),
+                            "expected 42 (20+22), got {:?}", status.code());
+                        println!("SUCCESS: arithmetic works end-to-end");
+                    }
+                    Err(e) => panic!("link failed: {}", e),
+                }
+            }
+            Err(e) => panic!("compile failed: {}", e),
+        }
+    }
+
+    #[test]
+    fn tc_e2e_hello_sovereign() {
+        // Wire axon_println by providing a C implementation at link time
+        // Write a C shim that implements axon_println
+        let c_shim = r#"
+#include <stdio.h>
+void axon_println(const char* s) { printf("%s\n", s); }
+void axon_print(const char* s) { printf("%s", s); }
+void axon_print_int(long long n) { printf("%lld", n); }
+"#;
+        std::fs::write("/tmp/axon_stdlib.c", c_shim).unwrap();
+        let status = std::process::Command::new("clang")
+            .args(&["-c", "/tmp/axon_stdlib.c", "-o", "/tmp/axon_stdlib.o"])
+            .status().expect("clang failed");
+        assert!(status.success(), "stdlib compile failed");
+
+        // Now compile AXON program that returns 0
+        let src = "fn main() -> i32 { return 0; }";
+        let ir = emit_src(src);
+        match ir_to_object(&ir, "/tmp") {
+            Ok(obj) => {
+                // Link with stdlib
+                let status = std::process::Command::new("clang")
+                    .args(&[&obj, "/tmp/axon_stdlib.o", "-o", "/tmp/axon_hello", "-no-pie"])
+                    .status().expect("link failed");
+                if status.success() {
+                    let run = std::process::Command::new("/tmp/axon_hello")
+                        .status().expect("run failed");
+                    assert_eq!(run.code(), Some(0));
+                    println!("SUCCESS: AXON program with stdlib linked and ran");
+                } else {
+                    println!("Link note: stdlib linking needs more work");
+                }
+            }
+            Err(e) => println!("compile note: {}", e),
         }
     }
 

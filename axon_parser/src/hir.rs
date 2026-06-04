@@ -372,6 +372,8 @@ pub struct HirLowerer {
     next_borrow: u32,
     next_node: u32,
     errors: Vec<HirError>,
+    /// Variable name → PlaceId mapping for current scope
+    name_env: Vec<std::collections::HashMap<String, PlaceId>>,
 }
 
 impl HirLowerer {
@@ -381,6 +383,7 @@ impl HirLowerer {
             next_borrow: 0,
             next_node: 0,
             errors: Vec::new(),
+            name_env: vec![std::collections::HashMap::new()],
         }
     }
 
@@ -413,6 +416,25 @@ impl HirLowerer {
         let id = NodeId(self.next_node);
         self.next_node += 1;
         id
+    }
+    fn push_scope(&mut self) {
+        self.name_env.push(std::collections::HashMap::new());
+    }
+    fn pop_scope(&mut self) {
+        self.name_env.pop();
+    }
+    fn bind_name(&mut self, name: String, place: PlaceId) {
+        if let Some(scope) = self.name_env.last_mut() {
+            scope.insert(name, place);
+        }
+    }
+    fn lookup_name(&self, name: &str) -> Option<PlaceId> {
+        for scope in self.name_env.iter().rev() {
+            if let Some(&place) = scope.get(name) {
+                return Some(place);
+            }
+        }
+        None
     }
 
     fn error(&mut self, msg: impl Into<String>, span: Span) {
@@ -501,8 +523,13 @@ impl HirLowerer {
         // H8 KNOWN-GAP: Complex parameter patterns (e.g. fn f((x,y): (i32,i32)))
         // are not yet destructured — only a single PlaceId per param is allocated.
         // Full destructuring support targeted for Stage 8C.
-        let params = sig.params.iter().map(|p| {
+        self.push_scope();
+        let params: Vec<(PlaceId, HirTy)> = sig.params.iter().map(|p| {
             let place = self.fresh_place();
+            // Bind param name so Ident lookups resolve to this PlaceId
+            if let Pat::Ident(ref ident, _) = p.pat {
+                self.bind_name(ident.name.clone(), place);
+            }
             (place, self.lower_ty(&p.ty))
         }).collect();
         let ret = sig.ret.as_ref().map(|t| self.lower_ty(t)).unwrap_or(HirTy::Unit);
@@ -514,6 +541,7 @@ impl HirLowerer {
             }
         }).collect();
         let body = self.lower_expr(body);
+        self.pop_scope();
         HirFn {
             name: sig.name.name,
             generics: sig.generics.iter().map(|g| g.name.clone()).collect(),
@@ -572,7 +600,9 @@ impl HirLowerer {
         let kind = match expr {
             Expr::Lit(lit, _) => HirExprKind::Lit(self.lower_lit(lit)),
             Expr::Ident(ident) => {
-                let place = self.fresh_place();
+                // Look up variable in name_env — reuse existing PlaceId
+                let place = self.lookup_name(&ident.name)
+                    .unwrap_or_else(|| self.fresh_place());
                 HirExprKind::Place(place, MoveState::Owned)
             }
             Expr::Block(stmts, tail, _) => {
@@ -705,6 +735,10 @@ impl HirLowerer {
                 let place = self.fresh_place();
                 let hty = ty.as_ref().map(|t| self.lower_ty(t)).unwrap_or(HirTy::Infer);
                 let hval = val.map(|v| self.lower_expr(v));
+                // Bind let name so subsequent Ident refs resolve correctly
+                if let Pat::Ident(ref ident, _) = pat {
+                    self.bind_name(ident.name.clone(), place);
+                }
                 HirStmt {
                     kind: HirStmtKind::Let(place, true, hty, hval),
                     span: s,
