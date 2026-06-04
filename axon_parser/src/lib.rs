@@ -11,3 +11,7 @@ pub mod tvt;
 pub use parser::{parse, Item, Expr, Stmt, Ty, Pat, FnSig, Contract, ContractKind, ParseError};
 
 pub mod hir;
+
+pub mod infer;
+
+pub mod codegen;
