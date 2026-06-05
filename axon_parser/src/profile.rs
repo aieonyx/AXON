@@ -13,6 +13,7 @@
 // Profile is checked at compile time — violations are errors.
 
 use crate::hir::{HirModule, HirItem, HirFn};
+use crate::capflow::{CallGraph, propagate, format_chain, TransitiveCaps};
 
 // ============================================================
 // CAPABILITY DEFINITIONS
@@ -371,6 +372,117 @@ impl ProfileChecker {
 }
 
 // ============================================================
+// TRANSITIVE CAPABILITY VIOLATIONS
+// ============================================================
+
+/// A violation discovered via transitive capability propagation.
+#[derive(Debug, Clone)]
+pub struct TransitiveViolation {
+    pub capability: String,
+    pub profile: Profile,
+    /// The function that lacks the required annotation.
+    pub caller: String,
+    /// The full call chain showing where the cap originates.
+    pub chain: Vec<String>,
+    pub msg: String,
+}
+
+impl TransitiveViolation {
+    pub fn new(
+        cap: impl Into<String>,
+        profile: &Profile,
+        caller: impl Into<String>,
+        chain: Vec<String>,
+    ) -> Self {
+        let cap = cap.into();
+        let caller = caller.into();
+        let msg = format!(
+            "fn {} transitively requires capability '{}' via call chain: {}",
+            caller, cap, format_chain(&chain)
+        );
+        TransitiveViolation { capability: cap, profile: profile.clone(), caller, chain, msg }
+    }
+}
+
+impl std::fmt::Display for TransitiveViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "[TRANSITIVE VIOLATION] {}", self.msg)
+    }
+}
+
+// ============================================================
+// TRANSITIVE PROFILE CHECKER
+// ============================================================
+
+/// Second-pass checker: verifies that every function's transitive
+/// capability set is permitted by the active profile, AND that
+/// any capability reaching a caller via a callee is also explicitly
+/// declared on the caller (or the chain is clean).
+///
+/// Rule: if cap ∈ transitive_caps(f) and cap ∉ declared_caps(f)
+///       and profile forbids cap → TransitiveViolation
+///
+/// The second condition catches the leakage case:
+///   g declares #[cap(network_connect)],
+///   f calls g but does NOT declare #[cap(network_connect)],
+///   profile forbids network_connect
+///   → VIOLATION on f with chain f → g
+pub fn check_transitive(
+    items: &[crate::parser::Item],
+    profile: &Profile,
+) -> Vec<TransitiveViolation> {
+    let cg = CallGraph::build_from_items(items);
+    let trans: TransitiveCaps = propagate(&cg);
+    let mut violations: Vec<TransitiveViolation> = Vec::new();
+
+    for (fname, info) in &trans {
+        let declared: Vec<String> = cg.declared_caps.get(fname).cloned().unwrap_or_default();
+        for cap_str in &info.transitive_caps {
+            // Check if profile forbids this cap
+            if let Some(cap) = Capability::from_str(cap_str) {
+                if !profile.allows(&cap) {
+                    // Only report if the cap came from a callee (not declared here)
+                    // Both cases are violations — but distinguish for clarity:
+                    // declared-but-forbidden already caught by check_fn().
+                    // Here we catch: cap inherited from callee, NOT declared on caller.
+                    if !declared.iter().any(|d| d == cap_str) {
+                        let chain = info
+                            .cap_chains
+                            .get(cap_str)
+                            .cloned()
+                            .unwrap_or_else(|| vec![fname.clone()]);
+                        violations.push(TransitiveViolation::new(
+                            cap_str.clone(),
+                            profile,
+                            fname.clone(),
+                            chain,
+                        ));
+                    }
+                }
+            }
+            // Unknown cap strings are caught by check_fn() — skip here
+        }
+    }
+    violations
+}
+
+/// Fatal enforcement for transitive violations.
+/// Call after check_transitive() from any CLI entry point.
+pub fn enforce_transitive(violations: &[TransitiveViolation]) {
+    if !violations.is_empty() {
+        eprintln!(
+            "AXON transitive capability enforcement: {} violation(s) found:",
+            violations.len()
+        );
+        for v in violations {
+            eprintln!("  {}", v);
+        }
+        eprintln!("Compilation aborted. Transitive capability violations are fatal.");
+        std::process::exit(1);
+    }
+}
+
+// ============================================================
 // CLI ARG PARSING
 // ============================================================
 
@@ -598,5 +710,80 @@ mod tests {
         let result = CompilerArgs::parse(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown profile"));
+    }
+
+    // ── Transitive capability tests (Phase 9) ───────────────
+
+    fn check_trans_src(src: &str, profile: Profile) -> Vec<super::TransitiveViolation> {
+        let items = crate::parser::parse(src).expect("parse failed");
+        super::check_transitive(&items, &profile)
+    }
+
+    #[test]
+    fn te16_transitive_violation_detected() {
+        // f calls g; g has network_connect; seL4-strict forbids it
+        // f does NOT declare network_connect → transitive violation on f
+        let src = r#"
+            #[cap(network_connect)]
+            fn g(x: i32) -> i32 { return x; }
+            fn f(x: i32) -> i32 { return g(x); }
+        "#;
+        let vs = check_trans_src(src, Profile::SeL4Strict);
+        assert!(
+            vs.iter().any(|v| v.caller == "f" && v.capability == "network_connect"),
+            "must detect transitive network_connect violation on f"
+        );
+    }
+
+    #[test]
+    fn te17_no_transitive_violation_when_allowed() {
+        // mesh-node allows network_connect — no violation
+        let src = r#"
+            #[cap(network_connect)]
+            fn g(x: i32) -> i32 { return x; }
+            fn f(x: i32) -> i32 { return g(x); }
+        "#;
+        let vs = check_trans_src(src, Profile::MeshNode);
+        assert!(vs.is_empty(), "mesh-node allows network_connect — no violation");
+    }
+
+    #[test]
+    fn te18_chain_two_hops_reported() {
+        // h → g → inner; inner has file_write; seL4-strict forbids it
+        let src = r#"
+            #[cap(file_write)]
+            fn inner(x: i32) -> i32 { return x; }
+            fn g(x: i32) -> i32 { return inner(x); }
+            fn h(x: i32) -> i32 { return g(x); }
+        "#;
+        let vs = check_trans_src(src, Profile::SeL4Strict);
+        // h and g must both be flagged
+        assert!(vs.iter().any(|v| v.caller == "h"), "h must be flagged");
+        assert!(vs.iter().any(|v| v.caller == "g"), "g must be flagged");
+    }
+
+    #[test]
+    fn te19_clean_chain_no_violation() {
+        let src = r#"
+            fn add(x: i32, y: i32) -> i32 { return x; }
+            fn double(x: i32) -> i32 { return add(x, x); }
+        "#;
+        let vs = check_trans_src(src, Profile::SeL4Strict);
+        assert!(vs.is_empty(), "clean chain must have zero violations");
+    }
+
+    #[test]
+    fn te20_violation_message_contains_chain() {
+        let src = r#"
+            #[cap(network_connect)]
+            fn send(x: i32) -> i32 { return x; }
+            fn wrapper(x: i32) -> i32 { return send(x); }
+        "#;
+        let vs = check_trans_src(src, Profile::SeL4Strict);
+        let v = vs.iter().find(|v| v.caller == "wrapper")
+            .expect("wrapper must be flagged");
+        assert!(v.msg.contains("wrapper"), "msg must mention wrapper");
+        assert!(v.msg.contains("send"), "msg must mention send in chain");
+        assert!(v.msg.contains("network_connect"), "msg must name the cap");
     }
 }
