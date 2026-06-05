@@ -33,6 +33,7 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::Unit   => "void",
         HirTy::Never  => "void",
         HirTy::Str    => "ptr",
+        HirTy::String  => "ptr",   // heap String — opaque ptr (LLVM 18)
         // CF5: Infer is a type hole from HIR lowerer.
         // Expression nodes legitimately carry Infer until inference writes back (Profile Stage).
         // Function signatures must be concrete — checked separately in emit_fn.
@@ -77,11 +78,13 @@ pub struct LlvmEmitter {
     param_allocas: Vec<String>,
     /// Set to true when a ret instruction has been emitted in current fn
     fn_returned: bool,
+    /// M2: accumulated LLVM global string constants
+    string_literals: Vec<String>,
 }
 
 impl LlvmEmitter {
     pub fn new() -> Self {
-        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false }
+        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, string_literals: Vec::new() }
     }
     fn emit_line(&mut self, line: &str) {
         self.output.push_str(line);
@@ -103,9 +106,21 @@ impl LlvmEmitter {
         self.emit_line("declare void @axon_println(ptr)");
         self.emit_line("declare void @axon_print(ptr)");
         self.emit_line("declare void @axon_print_int(i64)");
+        // M2: String runtime externs
+        self.emit_line("declare ptr @axon_string_concat(ptr, ptr)");
+        self.emit_line("declare i64 @axon_string_len(ptr)");
+        self.emit_line("declare i1  @axon_string_is_empty(ptr)");
+        self.emit_line("declare i1  @axon_string_contains(ptr, ptr)");
+        self.emit_line("declare ptr @axon_string_to_uppercase(ptr)");
+        self.emit_line("declare ptr @axon_string_to_lowercase(ptr)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
+        // M2: append string literal globals
+        for global in &self.string_literals {
+            self.output.push_str(global);
+            self.output.push('\n');
+        }
         self.output.clone()
     }
 
@@ -267,6 +282,26 @@ impl LlvmEmitter {
                     HirExprKind::Path(segs) => segs.join("_"),
                     _ => "unknown_fn".to_string(),
                 };
+                // M3: sovereign print primitives — route to axon_ runtime
+                let sovereign_print = match fn_name.as_str() {
+                    "println" => Some("axon_println"),
+                    "print"   => Some("axon_print"),
+                    "print_int" => Some("axon_print_int"),
+                    _ => None,
+                };
+                if let Some(runtime_fn) = sovereign_print {
+                    // Emit each arg and call the runtime function
+                    let arg_vals: Vec<String> = args.iter()
+                        .filter_map(|a| {
+                            let v = self.emit_expr(a)?;
+                            Some(format!("{} {}", emit_llvm_ty(&a.ty), v))
+                        })
+                        .collect();
+                    self.emit_line(&format!(
+                        "  call void @{}({})", runtime_fn, arg_vals.join(", ")
+                    ));
+                    return None;
+                }
                 let mut arg_strs = Vec::new();
                 for arg in args {
                     if let Some(v) = self.emit_expr(arg) {
@@ -465,7 +500,7 @@ pub fn ir_to_ptx(ll_source: &str, out_dir: &str, sm: &str) -> Result<String, Str
 /// - Replace x86 datalayout and triple with nvptx64
 /// - Mark main() as .entry kernel
 /// - Remove stdlib declarations (no libc on GPU)
-fn patch_ir_for_gpu(ir: &str, sm: &str) -> String {
+fn patch_ir_for_gpu(ir: &str, _sm: &str) -> String {
     let mut lines: Vec<String> = ir.lines().map(|l| l.to_string()).collect();
 
     for line in lines.iter_mut() {

@@ -41,7 +41,7 @@ pub enum InfTy {
     // Concrete primitives
     Bool, I8, I16, I32, I64, I128, Isize,
     U8, U16, U32, U64, U128, Usize,
-    F32, F64, Char, Str, Unit, Never,
+    F32, F64, Char, Str, String, Unit, Never,
     // Compound
     Ref(bool, Option<String>, Box<InfTy>),
     Ptr(bool, Box<InfTy>),
@@ -99,7 +99,7 @@ pub fn hir_to_inf(ty: &HirTy) -> InfTy {
         HirTy::U32   => InfTy::U32,  HirTy::U64  => InfTy::U64,
         HirTy::U128  => InfTy::U128, HirTy::Usize=> InfTy::Usize,
         HirTy::F32   => InfTy::F32,  HirTy::F64  => InfTy::F64,
-        HirTy::Char  => InfTy::Char, HirTy::Str  => InfTy::Str,
+        HirTy::Char  => InfTy::Char, HirTy::Str  => InfTy::Str, HirTy::String => InfTy::String,
         HirTy::Unit  => InfTy::Unit, HirTy::Never=> InfTy::Never,
         HirTy::Ref(m, l, t) => InfTy::Ref(*m, l.clone(), Box::new(hir_to_inf(t))),
         HirTy::Ptr(m, t)    => InfTy::Ptr(*m, Box::new(hir_to_inf(t))),
@@ -124,7 +124,7 @@ pub fn inf_to_hir(ty: &InfTy) -> HirTy {
         InfTy::U32   => HirTy::U32,  InfTy::U64  => HirTy::U64,
         InfTy::U128  => HirTy::U128, InfTy::Usize=> HirTy::Usize,
         InfTy::F32   => HirTy::F32,  InfTy::F64  => HirTy::F64,
-        InfTy::Char  => HirTy::Char, InfTy::Str  => HirTy::Str,
+        InfTy::Char  => HirTy::Char, InfTy::Str  => HirTy::Str, InfTy::String => HirTy::String,
         InfTy::Unit  => HirTy::Unit, InfTy::Never=> HirTy::Never,
         InfTy::Ref(m, l, t) => HirTy::Ref(*m, l.clone(), Box::new(inf_to_hir(t))),
         InfTy::Ptr(m, t)    => HirTy::Ptr(*m, Box::new(inf_to_hir(t))),
@@ -544,7 +544,7 @@ impl ConstraintGen {
                     _ => lt,
                 }
             }
-            HirExprKind::UnOp(op, inner) => {
+            HirExprKind::UnOp(_op, inner) => {
                 self.generate_expr(inner)
             }
             HirExprKind::Call(func, args) => {
@@ -552,9 +552,20 @@ impl ConstraintGen {
                 for arg in args { self.generate_expr(arg); }
                 self.fresh_var() // return type unknown until 8B-3
             }
-            HirExprKind::MethodCall(recv, _, args) => {
-                self.generate_expr(recv);
+            HirExprKind::MethodCall(recv, method, args) => {
+                let recv_ty = self.generate_expr(recv);
                 for arg in args { self.generate_expr(arg); }
+                // M2: String method return types
+                if matches!(recv_ty, InfTy::String) {
+                    return match method.as_str() {
+                        "len"          => InfTy::Usize,
+                        "is_empty"     => InfTy::Bool,
+                        "contains"     => InfTy::Bool,
+                        "to_uppercase" => InfTy::String,
+                        "to_lowercase" => InfTy::String,
+                        _              => self.fresh_var(),
+                    };
+                }
                 self.fresh_var()
             }
             HirExprKind::Field(obj, _, place) => {
@@ -652,7 +663,6 @@ impl ConstraintGen {
             }
             HirExprKind::Path(_) => self.fresh_var(),
             HirExprKind::Drop(_) | HirExprKind::BorrowExpires(_) => InfTy::Unit,
-            _ => InfTy::Unit,
         }
     }
 
@@ -681,7 +691,7 @@ impl ConstraintGen {
         match lit {
             HirLit::Int(_)   => InfTy::I32,  // default integer type
             HirLit::Float(_) => InfTy::F64,  // default float type
-            HirLit::Str(_)   => InfTy::Str,
+            HirLit::Str(_)   => InfTy::String,
             HirLit::Char(_)  => InfTy::Char,
             HirLit::Bool(_)  => InfTy::Bool,
             HirLit::Unit     => InfTy::Unit,
