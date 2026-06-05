@@ -310,6 +310,34 @@ impl ProfileChecker {
                 ));
             }
         }
+        // Check: explicit @cap(capability_name) annotations against profile
+        // This is annotation-level capability enforcement — checks declared
+        // capability requirements against what the active profile permits.
+        for cap_name in &f.required_caps {
+            match Capability::from_str(cap_name) {
+                Some(cap) => {
+                    if !self.profile.allows(&cap) {
+                        self.violations.push(ProfileViolation::new(
+                            cap, &self.profile,
+                            format!("{} (@cap annotation declares forbidden capability '{}')", loc, cap_name)
+                        ));
+                    }
+                }
+                None => {
+                    // Unknown capability name — flag as violation for safety
+                    self.violations.push(ProfileViolation {
+                        capability: Capability::UnsafeAxon,
+                        profile: self.profile.clone(),
+                        location: loc.clone(),
+                        msg: format!(
+                            "unknown capability '{}' in @cap annotation at {} — rejected for safety",
+                            cap_name, loc
+                        ),
+                    });
+                }
+            }
+        }
+
         // Check: pure functions cannot use network or file caps
         if f.is_pure {
             for cap in &[

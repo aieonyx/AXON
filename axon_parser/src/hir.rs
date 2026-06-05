@@ -273,6 +273,9 @@ pub struct HirFn {
     pub is_pure: bool,
     pub is_ghost: bool,
     pub span: Span,
+    /// Capabilities explicitly required by @cap(capability_name) annotations.
+    /// Checked against the active profile at compile time.
+    pub required_caps: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -542,6 +545,13 @@ impl HirLowerer {
         }).collect();
         let body = self.lower_expr(body);
         self.pop_scope();
+        // Extract @cap(capability_name) annotations from function attrs
+        // These are checked against the active profile at compile time
+        let required_caps: Vec<String> = sig.attrs.iter()
+            .filter(|a| a.name == "cap" || a.name == "requires_cap" || a.name == "capability")
+            .flat_map(|a| a.args.iter().map(|arg| arg.clone()))
+            .collect();
+
         HirFn {
             name: sig.name.name,
             generics: sig.generics.iter().map(|g| g.name.clone()).collect(),
@@ -553,6 +563,7 @@ impl HirLowerer {
             is_pure: sig.is_pure,
             is_ghost: sig.is_ghost,
             span: sig.span,
+            required_caps,
         }
     }
 
