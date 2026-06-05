@@ -135,6 +135,7 @@ pub enum HirTy {
     U8, U16, U32, U64, U128, Usize,
     F32, F64,
     Char, Str,
+    String,                                      // heap-owned string (distinct from Str slice)
     Unit,
     Never,
     Ref(bool, Option<String>, Box<HirTy>),   // is_mut, lifetime, inner
@@ -379,6 +380,47 @@ pub struct HirLowerer {
     name_env: Vec<std::collections::HashMap<String, PlaceId>>,
 }
 
+// M4: recursively check if a HirTy contains HirTy::String
+fn hir_ty_contains_string(ty: &HirTy) -> bool {
+    match ty {
+        HirTy::String => true,
+        HirTy::Ref(_, _, inner) | HirTy::Ptr(_, inner) | HirTy::Slice(inner) =>
+            hir_ty_contains_string(inner),
+        HirTy::Array(inner, _) => hir_ty_contains_string(inner),
+        HirTy::Tuple(ts) => ts.iter().any(hir_ty_contains_string),
+        HirTy::Named(_, ts) => ts.iter().any(hir_ty_contains_string),
+        HirTy::Fn(ps, r) =>
+            ps.iter().any(hir_ty_contains_string) || hir_ty_contains_string(r),
+        _ => false,
+    }
+}
+
+// M4: recursively check if a HirExpr body uses any String literal
+fn hir_expr_contains_string(expr: &HirExpr) -> bool {
+    if matches!(expr.ty, HirTy::String) { return true; }
+    match &expr.kind {
+        HirExprKind::Lit(HirLit::Str(_)) => true,
+        HirExprKind::BinOp(_, l, r) =>
+            hir_expr_contains_string(l) || hir_expr_contains_string(r),
+        HirExprKind::Call(f, args) =>
+            hir_expr_contains_string(f) || args.iter().any(|a| hir_expr_contains_string(a)),
+        HirExprKind::MethodCall(recv, _, args) =>
+            hir_expr_contains_string(recv) || args.iter().any(|a| hir_expr_contains_string(a)),
+        HirExprKind::Block(stmts, tail) => {
+            stmts.iter().any(|s| match &s.kind {
+                HirStmtKind::Let(_, _, _, Some(e)) => hir_expr_contains_string(e),
+                HirStmtKind::Expr(e) => hir_expr_contains_string(e),
+                _ => false,
+            }) || tail.as_ref().map_or(false, |e| hir_expr_contains_string(e))
+        }
+        HirExprKind::If(c, t, e) =>
+            hir_expr_contains_string(c) || hir_expr_contains_string(t)
+            || e.as_ref().map_or(false, |e| hir_expr_contains_string(e)),
+        HirExprKind::Return(Some(e)) => hir_expr_contains_string(e),
+        _ => false,
+    }
+}
+
 impl HirLowerer {
     pub fn new() -> Self {
         HirLowerer {
@@ -552,6 +594,15 @@ impl HirLowerer {
             .flat_map(|a| a.args.iter().map(|arg| arg.clone()))
             .collect();
 
+        // M4: auto-infer alloc_heap for any fn whose signature or body uses String
+        let uses_string = params.iter().any(|(_, t)| hir_ty_contains_string(t))
+            || hir_ty_contains_string(&ret)
+            || hir_expr_contains_string(&body);
+        let mut required_caps = required_caps;
+        if uses_string && !required_caps.iter().any(|c| c == "alloc_heap") {
+            required_caps.push("alloc_heap".to_string());
+        }
+
         HirFn {
             name: sig.name.name,
             generics: sig.generics.iter().map(|g| g.name.clone()).collect(),
@@ -581,6 +632,7 @@ impl HirLowerer {
                     "u128"  => HirTy::U128, "usize"=> HirTy::Usize,
                     "f32"   => HirTy::F32,  "f64"  => HirTy::F64,
                     "char"  => HirTy::Char, "str"  => HirTy::Str,
+                    "String" => HirTy::String,
                     "()"    => HirTy::Unit,
                     _       => HirTy::Named(ident.name.clone(), args),
                 }
@@ -892,6 +944,40 @@ pub fn lower(items: Vec<Item>) -> HirModule {
 mod tests {
     use super::*;
     use crate::parser::parse;
+
+    
+    #[test]
+    fn tm4_string_param_infers_alloc_heap() {
+        // M4: fn taking String param must have alloc_heap in required_caps
+        let m = lower_src("fn greet(name: String) -> i32 { return 0; }");
+        let f = match &m.items[0] { HirItem::Fn(f) => f, _ => panic!("expected fn") };
+        assert!(
+            f.required_caps.iter().any(|c| c == "alloc_heap"),
+            "String param must auto-infer alloc_heap, got: {:?}", f.required_caps
+        );
+    }
+
+    #[test]
+    fn tm4_string_literal_body_infers_alloc_heap() {
+        // M4: fn with string literal in body must have alloc_heap
+        let m = lower_src("fn hello() -> i32 { let s: String = \"hi\"; return 0; }");
+        let f = match &m.items[0] { HirItem::Fn(f) => f, _ => panic!("expected fn") };
+        assert!(
+            f.required_caps.iter().any(|c| c == "alloc_heap"),
+            "String literal must auto-infer alloc_heap, got: {:?}", f.required_caps
+        );
+    }
+
+    #[test]
+    fn tm4_pure_int_fn_no_alloc_heap() {
+        // M4: fn with no strings must NOT get alloc_heap
+        let m = lower_src("fn add(a: i32, b: i32) -> i32 { return 0; }");
+        let f = match &m.items[0] { HirItem::Fn(f) => f, _ => panic!("expected fn") };
+        assert!(
+            !f.required_caps.iter().any(|c| c == "alloc_heap"),
+            "pure int fn must not get alloc_heap, got: {:?}", f.required_caps
+        );
+    }
 
     fn lower_src(src: &str) -> HirModule {
         let items = parse(src).expect("parse failed");
