@@ -5,8 +5,8 @@
 
 use crate::hir::{
     HirModule, HirItem, HirFn, HirExpr, HirExprKind,
-    HirStmt, HirStmtKind, HirLit, HirTy, HirPat,
-    HirMatchArm, PlaceId,
+    HirStmt, HirStmtKind, HirLit, HirTy,
+    PlaceId,
 };
 use crate::parser::BinaryOp;
 use std::collections::HashMap;
@@ -43,7 +43,10 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
 }
 
 pub fn emit_llvm_ty_owned(ty: &HirTy) -> String {
-    emit_llvm_ty(ty).to_string()
+    match ty {
+        HirTy::Array(elem, n) => format!("[{} x {}]", n, emit_llvm_ty_owned(elem)),
+        _ => emit_llvm_ty(ty).to_string(),
+    }
 }
 
 struct SsaNames {
@@ -70,6 +73,7 @@ impl SsaNames {
     }
 }
 
+#[allow(dead_code)]
 pub struct LlvmEmitter {
     output: String,
     ssa: SsaNames,
@@ -82,6 +86,7 @@ pub struct LlvmEmitter {
     string_literals: Vec<String>,
 }
 
+#[allow(clippy::new_without_default)]
 impl LlvmEmitter {
     pub fn new() -> Self {
         LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, string_literals: Vec::new() }
@@ -113,6 +118,7 @@ impl LlvmEmitter {
         self.emit_line("declare i1  @axon_string_contains(ptr, ptr)");
         self.emit_line("declare ptr @axon_string_to_uppercase(ptr)");
         self.emit_line("declare ptr @axon_string_to_lowercase(ptr)");
+        self.emit_line("declare void @axon_bounds_check(i64, i64)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -334,6 +340,24 @@ impl LlvmEmitter {
                 self.emit_line(&format!("  {} = bitcast {} {} to {}", tmp, from_ty, iv, to_ty));
                 Some(tmp)
             }
+            HirExprKind::Index(obj, idx, _) => {
+                let arr_ptr = self.emit_expr(obj)?;
+                let idx_val = self.emit_expr(idx)?;
+                let (arr_ty, elem_ty, arr_len) = match &obj.ty {
+                    HirTy::Array(elem, n) => (
+                        format!("[{} x {}]", n, emit_llvm_ty_owned(elem)),
+                        emit_llvm_ty_owned(elem),
+                        *n as i64,
+                    ),
+                    _ => ("[0 x i32]".to_string(), "i32".to_string(), 0_i64),
+                };
+                self.emit_line(&format!("  call void @axon_bounds_check(i64 {}, i64 {})", idx_val, arr_len));
+                let gep = self.ssa.fresh_tmp();
+                self.emit_line(&format!("  {} = getelementptr inbounds {}, ptr {}, i64 0, i64 {}", gep, arr_ty, arr_ptr, idx_val));
+                let tmp = self.ssa.fresh_tmp();
+                self.emit_line(&format!("  {} = load {}, ptr {}", tmp, elem_ty, gep));
+                Some(tmp)
+            }
             HirExprKind::Ref(_is_mut, place, _) => {
                 Some(self.ssa.place_name(*place))
             }
@@ -350,8 +374,19 @@ impl LlvmEmitter {
                 last
             }
             HirExprKind::Array(exprs) => {
-                for e in exprs { self.emit_expr(e); }
-                Some("null".to_string())
+                let n = exprs.len();
+                let elem_ty = if n > 0 { emit_llvm_ty_owned(&exprs[0].ty) } else { "i32".to_string() };
+                let arr_ty = format!("[{} x {}]", n, elem_ty);
+                let alloca = self.ssa.fresh_tmp();
+                self.emit_line(&format!("  {} = alloca {}", alloca, arr_ty));
+                for (i, e) in exprs.iter().enumerate() {
+                    if let Some(v) = self.emit_expr(e) {
+                        let gep = self.ssa.fresh_tmp();
+                        self.emit_line(&format!("  {} = getelementptr inbounds {}, ptr {}, i64 0, i64 {}", gep, arr_ty, alloca, i));
+                        self.emit_line(&format!("  store {} {}, ptr {}", elem_ty, v, gep));
+                    }
+                }
+                Some(alloca)
             }
             _ => None,
         }
@@ -360,7 +395,7 @@ impl LlvmEmitter {
     fn emit_stmt(&mut self, stmt: &HirStmt) {
         match &stmt.kind {
             HirStmtKind::Let(place, _, ty, init) => {
-                let llty = emit_llvm_ty(ty);
+                let llty = emit_llvm_ty_owned(ty);
                 let alloca = self.ssa.fresh_tmp();
                 self.emit_line(&format!("  {} = alloca {}", alloca, llty));
                 // Register in place_map so Place(id) resolves to this alloca
@@ -431,13 +466,14 @@ pub fn emit_ir(module: &HirModule) -> String {
     emitter.emit_module(module)
 }
 
+#[allow(clippy::needless_borrows_for_generic_args)]
 pub fn ir_to_object(ll_source: &str, out_dir: &str) -> Result<String, String> {
     let ll_path = format!("{}/axon_out.ll", out_dir);
     let obj_path = format!("{}/axon_out.o", out_dir);
     std::fs::write(&ll_path, ll_source)
         .map_err(|e| format!("failed to write .ll: {}", e))?;
     let output = Command::new("llc")
-        .args(&["-filetype=obj", "-o", &obj_path, &ll_path])
+        .args(&["-filetype=obj", "-o", obj_path.as_str(), ll_path.as_str()])
         .output()
         .map_err(|e| format!("llc not found: {}", e))?;
     if !output.status.success() {
@@ -450,6 +486,7 @@ pub fn ir_to_object(ll_source: &str, out_dir: &str) -> Result<String, String> {
 /// Emit PTX assembly for NVIDIA GPU targets.
 /// Uses llc-18 with nvptx64 backend.
 /// sm_75 = T4 (Turing), sm_80 = A100, sm_86 = RTX 3090
+#[allow(clippy::useless_format, clippy::needless_borrows_for_generic_args)]
 pub fn ir_to_ptx(ll_source: &str, out_dir: &str, sm: &str) -> Result<String, String> {
     let ll_path = format!("{}/axon_gpu.ll", out_dir);
     let ptx_path = format!("{}/axon_gpu.ptx", out_dir);
@@ -463,7 +500,7 @@ pub fn ir_to_ptx(ll_source: &str, out_dir: &str, sm: &str) -> Result<String, Str
     let output = Command::new("llc-18")
         .args(&[
             "-O2",
-            &format!("-march=nvptx64"),
+            "-march=nvptx64",
             &format!("-mcpu=sm_{}", sm),
             "-filetype=asm",
             "-o", &ptx_path,
@@ -480,7 +517,7 @@ pub fn ir_to_ptx(ll_source: &str, out_dir: &str, sm: &str) -> Result<String, Str
     // Validate with ptxas
     let ptxas = Command::new("ptxas")
         .args(&[
-            &format!("-arch=sm_{}", sm),
+            &format!("-arch=sm_{}", sm) as &str,
             "-o", "/dev/null",
             &ptx_path,
         ])
@@ -541,6 +578,7 @@ fn patch_ir_for_gpu(ir: &str, _sm: &str) -> String {
 /// Compile LLVM IR to aarch64-unknown-none-elf object for seL4.
 /// Uses llc-18 with aarch64 bare-metal target.
 /// Profile seL4-strict is enforced before this is called.
+#[allow(clippy::needless_borrows_for_generic_args)]
 pub fn ir_to_sel4(ll_source: &str, out_dir: &str) -> Result<String, String> {
     let ll_path = format!("{}/axon_sel4.ll", out_dir);
     let obj_path = format!("{}/axon_sel4.o", out_dir);
@@ -602,6 +640,7 @@ fn patch_ir_for_sel4(ir: &str) -> String {
 /// Validate a seL4-strict object: confirm it is aarch64 ELF,
 /// has no dynamic dependencies, and contains no forbidden symbols.
 /// Returns Ok(()) on pass, Err(violations) on fail.
+#[allow(clippy::needless_borrows_for_generic_args)]
 pub fn sel4_abi_check(obj_path: &str) -> Result<(), String> {
     let mut violations: Vec<String> = Vec::new();
 
@@ -636,6 +675,7 @@ pub fn sel4_abi_check(obj_path: &str) -> Result<(), String> {
     }
 }
 
+#[allow(clippy::needless_borrows_for_generic_args)]
 pub fn object_to_binary(obj_path: &str, bin_path: &str) -> Result<(), String> {
     let output = Command::new("clang")
         .args(&[obj_path, "-o", bin_path, "-no-pie"])
@@ -805,6 +845,55 @@ mod tests {
         let ir = emit_src("fn f(x: i32) -> i32 { return x; }");
         assert!(ir.contains("entry:"));
         assert!(ir.contains("ret"));
+    }
+
+    #[test]
+    fn tc_p11_array_ty_owned() {
+        // emit_llvm_ty_owned must return [N x T] for array types
+        let ty = HirTy::Array(Box::new(HirTy::I32), 3);
+        assert_eq!(emit_llvm_ty_owned(&ty), "[3 x i32]");
+        let ty2 = HirTy::Array(Box::new(HirTy::Bool), 8);
+        assert_eq!(emit_llvm_ty_owned(&ty2), "[8 x i1]");
+    }
+
+    #[test]
+    fn tc_p11_array_literal_ir() {
+        // Array literal [1, 2, 3] must emit alloca [3 x i32] and GEP stores
+        let ir = emit_src("fn f() -> i32 { let a: [i32; 3] = [1, 2, 3]; return 0; }");
+        assert!(ir.contains("alloca"), "IR must contain alloca: {}", ir);
+        assert!(ir.contains("getelementptr"), "IR must contain GEP: {}", ir);
+        assert!(ir.contains("store"), "IR must contain store: {}", ir);
+    }
+
+    #[test]
+    fn tc_p11_array_index_ir() {
+        // Index expression a[0] must emit bounds_check call and GEP load
+        let src = "fn f() -> i32 { let a: [i32; 3] = [1, 2, 3]; return 0; }";
+        let ir = emit_src(src);
+        assert!(ir.contains("getelementptr"), "must have GEP: {}", ir);
+    }
+
+    #[test]
+    fn tc_p11_bounds_check_declared() {
+        // Module must declare @axon_bounds_check
+        let ir = emit_src("fn f() -> i32 { return 0; }");
+        assert!(ir.contains("axon_bounds_check"), "must declare bounds_check: {}", ir);
+    }
+
+    #[test]
+    fn tc_p11_array_ir_no_panic() {
+        // Compiler must not panic on array literal
+        let ir = emit_src("fn f() -> i32 { let a: [i32; 2] = [10, 20]; return 0; }");
+        assert!(!ir.is_empty());
+        assert!(ir.contains("target triple"));
+    }
+
+    #[test]
+    fn tc_p11_array_ty_owned_nested() {
+        // Nested array type: [[i32; 2]; 3]
+        let inner = HirTy::Array(Box::new(HirTy::I32), 2);
+        let outer = HirTy::Array(Box::new(inner), 3);
+        assert_eq!(emit_llvm_ty_owned(&outer), "[3 x [2 x i32]]");
     }
 
     #[test]

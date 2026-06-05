@@ -967,6 +967,7 @@ impl Parser {
         self.allow_struct_lit = prev;
         result
     }
+    #[allow(dead_code)]
     fn parse_assign_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
         let lhs = self.parse_range_expr_no_struct()?;
         let span = self.current_span();
@@ -979,6 +980,7 @@ impl Parser {
             _ => Ok(lhs)
         }
     }
+    #[allow(dead_code)]
     fn parse_range_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
         let span = self.current_span();
         let lhs = self.parse_or_expr_no_struct()?;
@@ -988,16 +990,19 @@ impl Parser {
             Ok(Expr::Range(Some(Box::new(lhs)), rhs, inc, span))
         } else { Ok(lhs) }
     }
+    #[allow(dead_code)]
     fn parse_or_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_and_expr_no_struct()?;
         while matches!(self.peek(), TokenKind::PipePipe) { let s = self.current_span(); self.advance(); lhs = Expr::Binary(BinaryOp::Or, Box::new(lhs), Box::new(self.parse_and_expr_no_struct()?), s); }
         Ok(lhs)
     }
+    #[allow(dead_code)]
     fn parse_and_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_cmp_expr_no_struct()?;
         while matches!(self.peek(), TokenKind::AmpAmp) { let s = self.current_span(); self.advance(); lhs = Expr::Binary(BinaryOp::And, Box::new(lhs), Box::new(self.parse_cmp_expr_no_struct()?), s); }
         Ok(lhs)
     }
+    #[allow(dead_code)]
     fn parse_cmp_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_add_expr()?;
         loop {
@@ -1007,6 +1012,7 @@ impl Parser {
         }
         Ok(lhs)
     }
+    #[allow(dead_code)]
     fn parse_primary_expr_no_struct(&mut self) -> Result<Expr, ParseError> {
         let s = self.current_span();
         // Same as parse_primary_expr but Ident never enters struct literal path

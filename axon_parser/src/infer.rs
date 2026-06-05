@@ -11,10 +11,10 @@
 //   → apply_subst()             → HirModule (fully typed)
 
 use crate::hir::{
-    HirModule, HirItem, HirFn, HirStruct, HirEnum,
+    HirModule, HirItem, HirFn,
     HirExpr, HirExprKind, HirStmt, HirStmtKind,
-    HirPat, HirMatchArm, HirLit, HirTy, HirImpl,
-    PlaceId, BorrowId, MoveState, NodeId,
+    HirLit, HirTy,
+    PlaceId,
 };
 use crate::parser::BinaryOp;
 use std::collections::HashMap;
@@ -134,7 +134,7 @@ pub fn inf_to_hir(ty: &InfTy) -> HirTy {
         InfTy::Named(n, ts) => HirTy::Named(n.clone(), ts.iter().map(inf_to_hir).collect()),
         InfTy::Fn(ps, r)    => HirTy::Fn(ps.iter().map(inf_to_hir).collect(), Box::new(inf_to_hir(r))),
         InfTy::Var(_)       => HirTy::Infer, // unsolved — stays as hole
-        InfTy::Error(e)     => HirTy::Error,
+        InfTy::Error(_e)    => HirTy::Error,
     }
 }
 
@@ -270,6 +270,7 @@ pub struct Unifier {
     pub errors: Vec<TypeError>,
 }
 
+#[allow(clippy::new_without_default)]
 impl Unifier {
     pub fn new() -> Self {
         Unifier { subst: Substitution::new(), errors: Vec::new() }
@@ -307,10 +308,10 @@ impl Unifier {
                 }
             }
             // Compound types
-            (InfTy::Ref(m1,l1,t1), InfTy::Ref(m2,l2,t2)) => {
+            (InfTy::Ref(m1,_l1,t1), InfTy::Ref(m2,_l2,t2)) => {
                 if m1 != m2 {
                     self.errors.push(TypeError::Custom(
-                        format!("mutability mismatch in reference types")
+                        "mutability mismatch in reference types".to_string()
                     ));
                 }
                 self.unify(*t1, *t2);
@@ -393,6 +394,7 @@ pub struct TypeEnv {
     pub places: HashMap<PlaceId, InfTy>,
 }
 
+#[allow(clippy::new_without_default)]
 impl TypeEnv {
     pub fn new() -> Self {
         TypeEnv { scopes: vec![HashMap::new()], places: HashMap::new() }
@@ -443,6 +445,7 @@ pub struct ConstraintGen {
     current_ret: Option<InfTy>,
 }
 
+#[allow(clippy::new_without_default)]
 impl ConstraintGen {
     pub fn new() -> Self {
         ConstraintGen {

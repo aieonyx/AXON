@@ -66,6 +66,7 @@ pub struct AxonVec<T> {
     data: Vec<T>,
 }
 
+#[allow(clippy::new_without_default)]
 impl<T> AxonVec<T> {
     pub fn new() -> Self {
         AxonVec { data: Vec::new() }
@@ -106,7 +107,7 @@ impl<T> AxonVec<T> {
 
     pub fn clear(&mut self) { self.data.clear(); }
 
-    pub fn iter(&self) -> std::slice::Iter<T> { self.data.iter() }
+    pub fn iter(&self) -> std::slice::Iter<'_, T> { self.data.iter() }
 }
 
 impl<T: Clone> AxonVec<T> {
@@ -233,6 +234,7 @@ pub struct AxonString {
     data: String,
 }
 
+#[allow(clippy::new_without_default, clippy::should_implement_trait)]
 impl AxonString {
     pub fn new() -> Self { AxonString { data: String::new() } }
 
