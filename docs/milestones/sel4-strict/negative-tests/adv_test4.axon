@@ -1,0 +1,5 @@
+#[cap(alloc_heap)]
+fn allocate(x: i32) -> i32 {
+    return x;
+}
+fn main() -> i32 { return 0; }
