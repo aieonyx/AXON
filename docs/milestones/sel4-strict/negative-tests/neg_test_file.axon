@@ -1,0 +1,7 @@
+fn file_write_data(x: i32) -> i32 {
+    return x;
+}
+
+fn main() -> i32 {
+    return 0;
+}
