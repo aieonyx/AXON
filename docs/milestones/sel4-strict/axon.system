@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AXON seL4-strict System — Milestone 2
+  Copyright 2026 Edison Lepiten — AIEONYX
+-->
+<system>
+    <protection_domain name="axon_pd" priority="254">
+        <program_image path="axon_pd.elf" />
+    </protection_domain>
+</system>

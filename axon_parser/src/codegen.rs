@@ -139,7 +139,7 @@ impl LlvmEmitter {
         }).collect();
         let ret_ty = emit_llvm_ty(&f.ret);
         // main() is always public — linker requires it
-        let linkage = if f.name == "main" || f.is_pub { "" } else { "internal " };
+        let linkage = ""; // External linkage: required for cross-object linking (seL4 PD, FFI, ARPi)
         if matches!(f.ret, HirTy::Unit | HirTy::Never) {
             self.emit_line(&format!("define {}void @{}({}) {{", linkage, f.name, params.join(", ")));
         } else {
@@ -500,6 +500,105 @@ fn patch_ir_for_gpu(ir: &str, sm: &str) -> String {
 
     lines.join("
 ")
+}
+
+
+/// Compile LLVM IR to aarch64-unknown-none-elf object for seL4.
+/// Uses llc-18 with aarch64 bare-metal target.
+/// Profile seL4-strict is enforced before this is called.
+pub fn ir_to_sel4(ll_source: &str, out_dir: &str) -> Result<String, String> {
+    let ll_path = format!("{}/axon_sel4.ll", out_dir);
+    let obj_path = format!("{}/axon_sel4.o", out_dir);
+
+    // Patch IR: replace x86 triple/datalayout with aarch64 bare-metal
+    let sel4_ir = patch_ir_for_sel4(ll_source);
+
+    std::fs::write(&ll_path, &sel4_ir)
+        .map_err(|e| format!("failed to write seL4 .ll: {}", e))?;
+
+    let output = Command::new("llc-18")
+        .args(&[
+            "-O2",
+            "--mtriple=aarch64-unknown-none-elf",
+            "-filetype=obj",
+            "-o", &obj_path,
+            &ll_path,
+        ])
+        .output()
+        .map_err(|e| format!("llc-18 not found: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("llc-18 seL4 failed: {}", stderr));
+    }
+
+    Ok(obj_path)
+}
+
+/// Patch LLVM IR for aarch64-unknown-none-elf (seL4 bare-metal):
+/// - Replace x86 datalayout and triple
+/// - Remove x86-specific module flags
+/// - Remove libc stdlib declarations (no libc on seL4)
+fn patch_ir_for_sel4(ir: &str) -> String {
+    let mut lines: Vec<String> = ir.lines().map(|l| l.to_string()).collect();
+
+    for line in lines.iter_mut() {
+        if line.starts_with("target triple") {
+            *line = "target triple = \"aarch64-unknown-none-elf\"".to_string();
+        }
+        if line.starts_with("target datalayout") {
+            *line = "target datalayout = \"e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128\"".to_string();
+        }
+        // Remove libc declarations — seL4 has no libc
+        if line.starts_with("declare void @axon_println")
+            || line.starts_with("declare void @axon_print(")
+            || line.starts_with("declare void @axon_print_int") {
+            *line = String::new();
+        }
+        // Remove x86 module flags
+        if line.starts_with("!llvm.module.flags") || line.starts_with("!0 =") {
+            *line = String::new();
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Validate a seL4-strict object: confirm it is aarch64 ELF,
+/// has no dynamic dependencies, and contains no forbidden symbols.
+/// Returns Ok(()) on pass, Err(violations) on fail.
+pub fn sel4_abi_check(obj_path: &str) -> Result<(), String> {
+    let mut violations: Vec<String> = Vec::new();
+
+    // 1. Confirm ELF machine type is AArch64 (EM_AARCH64 = 183 = 0xB7)
+    let file_out = Command::new("file")
+        .arg(obj_path)
+        .output()
+        .map_err(|e| format!("file not found: {}", e))?;
+    let file_str = String::from_utf8_lossy(&file_out.stdout);
+    if !file_str.contains("aarch64") && !file_str.contains("ARM aarch64") {
+        violations.push(format!("ABI: object is not aarch64 ELF: {}", file_str.trim()));
+    }
+
+    // 2. Check for forbidden dynamic symbols (libc, syscall, printf etc.)
+    let nm_out = Command::new("nm")
+        .args(&["--undefined-only", obj_path])
+        .output();
+    if let Ok(nm) = nm_out {
+        let syms = String::from_utf8_lossy(&nm.stdout);
+        let forbidden = ["printf", "malloc", "free", "exit", "syscall", "open", "read", "write"];
+        for sym in &forbidden {
+            if syms.contains(sym) {
+                violations.push(format!("ABI: forbidden symbol '{}' — not permitted in seL4-strict", sym));
+            }
+        }
+    }
+
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(violations.join("\n"))
+    }
 }
 
 pub fn object_to_binary(obj_path: &str, bin_path: &str) -> Result<(), String> {

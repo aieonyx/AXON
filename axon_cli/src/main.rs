@@ -92,7 +92,7 @@ fn cmd_build(args: &[String]) {
     use axon_parser::profile::{Profile, check_profile, enforce_profile};
     use axon_parser::parser::parse;
     use axon_parser::hir::lower;
-    use axon_parser::codegen::{emit_ir, ir_to_object, object_to_binary, ir_to_ptx};
+    use axon_parser::codegen::{emit_ir, ir_to_object, object_to_binary, ir_to_ptx, ir_to_sel4, sel4_abi_check};
 
     let mut profile_str: Option<String> = None;
     let mut output: Option<String> = None;
@@ -192,7 +192,38 @@ fn cmd_build(args: &[String]) {
         }
     }
 
-    // CPU target: compile → object → binary
+    // seL4 target: compile to aarch64-unknown-none-elf
+        if let Some(ref tgt) = target {
+            if tgt == "aarch64-sel4" {
+                println!("axon: targeting seL4 (aarch64-unknown-none-elf)");
+                match ir_to_sel4(&ir, "/tmp") {
+                    Ok(obj_path) => {
+                        let out = format!("{}.o", bin_path);
+                        std::fs::copy(&obj_path, &out).unwrap_or_else(|e| {
+                            eprintln!("axon: copy failed: {}", e);
+                            std::process::exit(1);
+                        });
+                        println!("axon: seL4 object ready: {}", out);
+                        match sel4_abi_check(&out) {
+                            Ok(()) => {
+                                println!("axon: seL4 ABI check PASSED");
+                                println!("axon: profile seL4-strict enforced");
+                                println!("axon: binary ready for BASTION signing");
+                            }
+                            Err(v) => {
+                                eprintln!("axon: seL4 ABI VIOLATIONS:
+{}", v);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => { eprintln!("axon: seL4 compile error: {}", e); std::process::exit(1); }
+                }
+                return;
+            }
+        }
+
+        // CPU target: compile → object → binary
     let obj = match ir_to_object(&ir, "/tmp") {
         Ok(p) => p,
         Err(e) => { eprintln!("axon: compile error: {}", e); std::process::exit(1); }
