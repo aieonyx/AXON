@@ -293,6 +293,23 @@ impl ProfileChecker {
 
     fn check_fn(&mut self, f: &HirFn) {
         let loc = format!("fn {}", f.name);
+        // Check capability annotations on function signature
+        // Functions named with capability prefixes are checked against profile
+        // Full annotation checking awaits HirFn carrying cap attrs (Phase 9)
+        // Current: check known forbidden capability name patterns in fn name
+        // and check is_pure / is_ghost attributes
+        let forbidden = self.profile.forbidden_capabilities();
+        for cap in &forbidden {
+            let cap_name = cap.name();
+            // If fn name contains a forbidden capability name, flag it
+            // e.g. fn network_connect_handler() under seL4-strict
+            if f.name.contains(cap_name) && cap_name.len() > 4 {
+                self.violations.push(ProfileViolation::new(
+                    cap.clone(), &self.profile,
+                    format!("{} (function references forbidden capability '{}')", loc, cap_name)
+                ));
+            }
+        }
         // Check: pure functions cannot use network or file caps
         if f.is_pure {
             for cap in &[
