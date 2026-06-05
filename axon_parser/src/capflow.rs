@@ -184,7 +184,7 @@ pub fn propagate(cg: &CallGraph) -> TransitiveCaps {
         entry.extend(dcaps.iter().cloned());
         let chain_entry = chains.entry(fname.clone()).or_default();
         for cap in dcaps {
-            chain_entry.entry(cap.clone()).or_insert_with(Vec::new);
+            chain_entry.entry(cap.clone()).or_default();
         }
     }
     for fname in cg.edges.keys() {

@@ -78,6 +78,7 @@ impl Capability {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Capability> {
         match s {
             "network_connect" => Some(Capability::NetworkConnect),
@@ -118,6 +119,7 @@ pub enum Profile {
 }
 
 impl Profile {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Profile> {
         match s {
             "seL4-strict"       | "sel4_strict"       => Some(Profile::SeL4Strict),
@@ -495,8 +497,8 @@ pub struct CompilerArgs {
     pub verbose: bool,
 }
 
-impl CompilerArgs {
-    pub fn default() -> Self {
+impl Default for CompilerArgs {
+    fn default() -> Self {
         CompilerArgs {
             input: None,
             output: None,
@@ -505,7 +507,9 @@ impl CompilerArgs {
             verbose: false,
         }
     }
+}
 
+impl CompilerArgs {
     /// Parse CLI args: axon build --profile seL4-strict input.axon -o output
     pub fn parse(args: &[String]) -> Result<CompilerArgs, String> {
         let mut result = CompilerArgs::default();
