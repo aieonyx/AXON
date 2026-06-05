@@ -1,0 +1,6 @@
+#[cap(ipc_send)]
+#[cap(ipc_receive)]
+fn axon_sender_logic() -> i32 {
+    let val: i32 = 21;
+    return val;
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AXON Two-PD IPC Demo — Protected Procedure Call
+  Sender calls receiver via PPC, receiver doubles value and returns.
+  Copyright 2026 Edison Lepiten — AIEONYX
+-->
+<system>
+    <protection_domain name="axon_sender" priority="254">
+        <program_image path="axon_sender.elf" />
+    </protection_domain>
+
+    <protection_domain name="axon_receiver" priority="253" pp="true">
+        <program_image path="axon_receiver.elf" />
+    </protection_domain>
+
+    <channel>
+        <end pd="axon_sender"   id="1" />
+        <end pd="axon_receiver" id="1" />
+    </channel>
+</system>
