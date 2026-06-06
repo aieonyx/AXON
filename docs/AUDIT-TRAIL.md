@@ -75,7 +75,7 @@
 | 7H-3 | 5 | 2 | 2 | 2 | ✅ Resolved |
 | **TOTAL** | **5** | **5** | **8** | **4** | **ALL RESOLVED** |
 
-*(Note: Stages 7C, 7D, 7E, 7F had internal correction cycles handled within the task flow, captured in stage documents. The 5 formal audits above are DeepSeek's close-gate audits.)*
+*(Note: Stages 7C, 7D, 7E, 7F had internal correction cycles handled within the task flow, captured in stage documents. The 5 formal audits above are close-gate audits.)*
 
 ---
 
@@ -85,9 +85,9 @@ These were identified during audits but deferred as acceptable spec-phase limita
 
 | Obligation | Origin | Phase 8 Stage |
 |-----------|--------|---------------|
-| SMT solver for full logical implication | 7G-3 DeepSeek | 8E |
-| GEP-based vtable dispatch in LLVM | 7H-3 DeepSeek | 8C |
-| Object code via llc/clang | 7H-3 DeepSeek | 8C |
+| SMT solver for full logical implication | 7G-3| 8E |
+| GEP-based vtable dispatch in LLVM | 7H-3 | 8C |
+| Object code via llc/clang | 7H-3  | 8C |
 | MoveStateMap per-statement (not per-block) | 7G-2 TODO(7H) | 8A |
 | compare_implies() missing: Ge⊢Gt edge, array drop ordering | 7G-3 M-001 | 8E |
 | Full monomorphization for generic return type E7E-008 | 7G-4 H-001 | 8B |
