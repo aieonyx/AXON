@@ -155,6 +155,8 @@ impl LlvmEmitter {
         self.emit_line("declare i64 @axon_ipc_call(i64, i64, ...)");
         self.emit_line("declare i64 @axon_ipc_send(i64, i64, ...)");
         self.emit_line("declare i64 @axon_ipc_recv(i64, ...)");
+        // P22-M2: axon_verify_core postcondition check stub
+        self.emit_line("declare void @axon_ensures_check(i32, i1)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -290,6 +292,20 @@ impl LlvmEmitter {
         let body_val = self.emit_expr(&f.body);
         // Only emit a default ret if body did not already emit one.
         // We track this via a flag set when Return is emitted.
+        // P22-M2: emit @ensures postcondition checks before ret
+        for (idx, contract) in f.contracts.iter().enumerate() {
+            if matches!(contract.kind, crate::parser::ContractKind::Ensures) {
+                let label = idx as u32;
+                self.emit_line(&format!(
+                    "  ; @ensures[{}]: postcondition marker — verified by axon_verify_core",
+                    label
+                ));
+                self.emit_line(&format!(
+                    "  call void @axon_ensures_check(i32 {}, i1 true)",
+                    label
+                ));
+            }
+        }
         if !self.fn_returned {
             if matches!(f.ret, HirTy::Unit | HirTy::Never) {
                 self.emit_line("  ret void");
@@ -1505,6 +1521,46 @@ fn main() -> i32 { return 0; }
         println!("MATCH IR:\n{}", ir);
         assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
         assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
+    // ── Phase 22 M2 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_ensures_check_emitted_in_ir() {
+        // @ensures annotation must emit axon_ensures_check call in IR
+        let src = "@ensures(x > 0) fn pos(x: i32) -> i32 { return x; }";
+        let ir = emit_src(src);
+        assert!(ir.contains("@axon_ensures_check"),
+            "IR must contain @axon_ensures_check call, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_ensures_marker_in_ir() {
+        // @ensures must emit a postcondition marker comment in IR
+        let src = "@ensures(x > 0) fn pos(x: i32) -> i32 { return x; }";
+        let ir = emit_src(src);
+        assert!(ir.contains("@ensures[0]:"),
+            "IR must contain @ensures[0]: marker, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_ensures_declare_stub_in_module() {
+        // Module IR must declare axon_ensures_check
+        let src = "fn f(x: i32) -> i32 { return x; }";
+        let ir = emit_src(src);
+        assert!(ir.contains("declare void @axon_ensures_check"),
+            "module IR must declare axon_ensures_check, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_requires_no_check_emitted() {
+        // @requires must NOT emit a runtime check (preconditions are static)
+        let src = "@requires(x > 0) fn pos(x: i32) -> i32 { return x; }";
+        let ir = emit_src(src);
+        // requires should not produce axon_ensures_check
+        let check_count = ir.matches("call void @axon_ensures_check").count();
+        assert_eq!(check_count, 0,
+            "@requires must not emit runtime check, got {} checks", check_count);
     }
 
     // ── Phase 21 M4 ──────────────────────────────────────────────────────────
