@@ -494,6 +494,7 @@ impl ConstraintGen {
                 self.emit(ety, hty, ConstraintOrigin::Explicit);
             }
             HirItem::TypeAlias(_, _, _) => {}
+            HirItem::ExternFn(_, _, _, _, _, _) => {} // P21: extern fns have no body to infer
             HirItem::Module(_, items) => {
                 for item in items { self.generate_item(item); }
             }

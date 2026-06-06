@@ -98,6 +98,14 @@ pub struct Attr { pub name: String, pub args: Vec<String>, pub span: Span }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericParam { pub name: String, pub bounds: Vec<Ty>, pub span: Span }
+/// P21-M1: Foreign function signature — name, params, return type (no body)
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternFnSig {
+    pub name: String,
+    pub params: Vec<(String, Ty)>,  // param name + type
+    pub ret: Option<Ty>,
+    pub span: Span,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnParam { pub pat: Pat, pub ty: Ty, pub span: Span }
@@ -117,6 +125,8 @@ pub enum Item {
     TypeAlias(Ident, Vec<GenericParam>, Ty, Span),
     Use(Vec<String>, Span), Mod(Ident, Vec<Item>, Span),
     Profile(ProfileDef), Const(Ident, Ty, Expr, Span),
+    /// P21-M1: extern block — ABI string + list of foreign fn signatures
+    Extern(String, Vec<ExternFnSig>, Span),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -380,6 +390,7 @@ impl Parser {
             TokenKind::Trait   => self.parse_trait(attrs, is_pub),
             TokenKind::Impl    => self.parse_impl(attrs),
             TokenKind::Type    => self.parse_type_alias(is_pub),
+            TokenKind::Extern  => self.parse_extern(),
             TokenKind::Use     => self.parse_use(),
             TokenKind::Mod     => self.parse_mod(is_pub),
             TokenKind::Profile => self.parse_profile(),
@@ -595,6 +606,48 @@ impl Parser {
         self.expect(&TokenKind::Semi)?;
         Ok(Item::TypeAlias(name, generics, ty, Span::new(start, end)))
     }
+    fn parse_extern(&mut self) -> Result<Item, ParseError> {
+        let start = self.current_span().start;
+        self.expect(&TokenKind::Extern)?;
+        // ABI string e.g. "C" — optional, default to "C"
+        let abi = if let TokenKind::StringLit(s) = self.peek().clone() {
+            self.advance();
+            s
+        } else {
+            "C".to_string()
+        };
+        self.expect(&TokenKind::LBrace)?;
+        let mut fns: Vec<ExternFnSig> = Vec::new();
+        while !matches!(self.peek(), TokenKind::RBrace | TokenKind::Eof) {
+            let fn_start = self.current_span().start;
+            // optional pub
+            let _ = self.eat(&TokenKind::Pub);
+            self.expect(&TokenKind::Fn)?;
+            let name = self.expect_ident()?.name;
+            self.expect(&TokenKind::LParen)?;
+            let mut params: Vec<(String, Ty)> = Vec::new();
+            while !matches!(self.peek(), TokenKind::RParen | TokenKind::Eof) {
+                let pname = self.expect_ident()?.name;
+                self.expect(&TokenKind::Colon)?;
+                let ty = self.parse_ty()?;
+                params.push((pname, ty));
+                if !self.eat(&TokenKind::Comma) { break; }
+            }
+            self.expect(&TokenKind::RParen)?;
+            let ret = if self.eat(&TokenKind::Arrow) {
+                Some(self.parse_ty()?)
+            } else {
+                None
+            };
+            self.expect(&TokenKind::Semi)?;
+            let fn_end = self.current_span().end;
+            fns.push(ExternFnSig { name, params, ret, span: Span::new(fn_start, fn_end) });
+        }
+        let end = self.current_span().end;
+        self.expect(&TokenKind::RBrace)?;
+        Ok(Item::Extern(abi, fns, Span::new(start, end)))
+    }
+
     fn parse_use(&mut self) -> Result<Item, ParseError> {
         let start = self.current_span().start;
         self.expect(&TokenKind::Use)?;
