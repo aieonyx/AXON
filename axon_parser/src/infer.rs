@@ -517,6 +517,11 @@ impl ConstraintGen {
 
     fn generate_expr(&mut self, expr: &HirExpr) -> InfTy {
         match &expr.kind {
+            HirExprKind::Try(e) => {
+                // ? operator: infer inner type, result is the Ok-unwrapped type
+                let _inner = self.generate_expr(e);
+                self.fresh_var()
+            }
             HirExprKind::Lit(lit) => self.lit_ty(lit),
             HirExprKind::Place(place, _) => {
                 self.env.place_ty(*place)

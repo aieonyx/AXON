@@ -200,6 +200,7 @@ pub enum HirExprKind {
     Return(Option<Box<HirExpr>>),
     Break(Option<Box<HirExpr>>),
     Continue,
+    Try(Box<HirExpr>), // P16-M3: ? operator — early return on Err
     Assign(PlaceId, Box<HirExpr>),
     Cast(Box<HirExpr>, HirTy),
     Tuple(Vec<HirExpr>),
@@ -427,6 +428,7 @@ fn hir_expr_contains_string(expr: &HirExpr) -> bool {
             hir_expr_contains_string(c) || hir_expr_contains_string(t)
             || e.as_ref().is_some_and(|e| hir_expr_contains_string(e)),
         HirExprKind::Return(Some(e)) => hir_expr_contains_string(e),
+        HirExprKind::Try(e) => hir_expr_contains_string(e),
         _ => false,
     }
 }
@@ -468,6 +470,7 @@ fn collect_places_rec(
             if let Some(t) = tail { collect_places_rec(t, outer, params, found); }
         }
         HirExprKind::Return(Some(e)) => collect_places_rec(e, outer, params, found),
+        HirExprKind::Try(e) => collect_places_rec(e, outer, params, found),
         _ => {}
     }
 }
@@ -665,6 +668,7 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
             hir_expr_contains_index(c) || hir_expr_contains_index(t)
             || e.as_ref().is_some_and(|e| hir_expr_contains_index(e)),
         HirExprKind::Return(Some(e)) => hir_expr_contains_index(e),
+        HirExprKind::Try(e) => hir_expr_contains_index(e),
         HirExprKind::Array(elems) => elems.iter().any(hir_expr_contains_index),
         _ => false,
     }
@@ -935,6 +939,9 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                 let captures = collect_free_places(&hbody, &outer_places, &hparams);
                 HirExprKind::Closure(hparams, Box::new(hbody), captures)
             }
+            Expr::Try(inner, _) => {
+                HirExprKind::Try(Box::new(self.lower_expr(*inner)))
+            }
             #[allow(unreachable_patterns)]
             _ => HirExprKind::Lit(HirLit::Unit),
         };
@@ -1086,6 +1093,7 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
             | Expr::While(_, _, s) | Expr::Loop(_, s)
             | Expr::For(_, _, _, s) | Expr::Match(_, _, s)
             | Expr::Return(_, s) | Expr::Break(_, s)
+            | Expr::Try(_, s)
             | Expr::Continue(s) | Expr::Struct(_, _, s)
             | Expr::Tuple(_, s) | Expr::Array(_, s)
             | Expr::Cast(_, _, s) | Expr::Ref(_, _, s)
