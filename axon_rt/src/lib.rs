@@ -118,3 +118,9 @@ pub extern "C" fn axon_print_int(val: i64) {
         sys_write(1, buf.as_ptr(), pos);
     }
 }
+
+/// Minimal panic handler required for no_std staticlib.
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
