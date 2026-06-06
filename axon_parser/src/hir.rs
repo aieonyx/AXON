@@ -364,6 +364,8 @@ pub enum HirItem {
 pub struct HirModule {
     pub items: Vec<HirItem>,
     pub errors: Vec<HirError>,
+    /// P19-M2: use path → fully-qualified item name
+    pub use_map: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -492,11 +494,19 @@ impl HirLowerer {
     }
 
     pub fn lower_module(mut self, items: Vec<Item>) -> HirModule {
+        // P19-M2: collect use paths before lowering
+        let mut use_paths: Vec<Vec<String>> = Vec::new();
+        for item in &items {
+            if let crate::parser::Item::Use(path, _) = item {
+                use_paths.push(path.clone());
+            }
+        }
         let mut hir_items = Vec::new();
         for item in items {
             if let Some(h) = self.lower_item(item) { hir_items.push(h) }
         }
-        HirModule { items: hir_items, errors: self.errors }
+        let use_map = resolve_uses(&hir_items, &use_paths);
+        HirModule { items: hir_items, errors: self.errors, use_map }
     }
 
     /// fresh_place() is module-scoped — counter persists for entire HirModule lowering.
@@ -1154,6 +1164,46 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
     }
 }
 
+
+// ============================================================
+// P19-M2: USE RESOLUTION
+// ============================================================
+
+fn resolve_uses(items: &[HirItem], use_paths: &[Vec<String>]) -> std::collections::HashMap<String, String> {
+    let mut ns: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    collect_namespace(items, &[], &mut ns);
+    let mut use_map = std::collections::HashMap::new();
+    for path in use_paths {
+        let fq = path.join("::");
+        let short = path.last().cloned().unwrap_or_default();
+        use_map.insert(short, fq);
+    }
+    use_map
+}
+
+fn collect_namespace(items: &[HirItem], prefix: &[String], ns: &mut std::collections::HashMap<String, String>) {
+    for item in items {
+        match item {
+            HirItem::Fn(f) => {
+                let fq = if prefix.is_empty() { f.name.clone() }
+                         else { format!("{}::{}", prefix.join("::"), f.name) };
+                ns.insert(fq.clone(), fq);
+            }
+            HirItem::Struct(s) => {
+                let fq = if prefix.is_empty() { s.name.clone() }
+                         else { format!("{}::{}", prefix.join("::"), s.name) };
+                ns.insert(fq.clone(), fq);
+            }
+            HirItem::Module(name, inner) => {
+                let mut new_prefix = prefix.to_vec();
+                new_prefix.push(name.clone());
+                collect_namespace(inner, &new_prefix, ns);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Public API: lower a parsed program into HIR
 pub fn lower(items: Vec<Item>) -> HirModule {
     HirLowerer::new().lower_module(items)
@@ -1281,6 +1331,40 @@ mod tests {
             assert!(matches!(&f.params[0].1, HirTy::I32),
                 "i32 param must stay HirTy::I32, got: {:?}", f.params[0].1);
         } else { panic!("expected fn"); }
+    }
+
+    // ── Phase 19 M2 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_use_resolves() {
+        // use foo::bar after mod foo { fn bar() {} } — use_map must contain bar → foo::bar
+        let src = r#"
+            mod foo { fn bar(x: i32) -> i32 { return x; } }
+            use foo::bar;
+        "#;
+        let m = lower_src(src);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        assert!(m.use_map.contains_key("bar"),
+            "use_map must contain 'bar', got: {:?}", m.use_map);
+        assert_eq!(m.use_map.get("bar").map(|s| s.as_str()), Some("foo::bar"),
+            "bar must resolve to foo::bar, got: {:?}", m.use_map.get("bar"));
+    }
+
+    #[test]
+    fn tc_use_map_empty_without_use() {
+        // Program with no use declarations — use_map must be empty
+        let m = lower_src("fn add(x: i32, y: i32) -> i32 { return x; }");
+        assert!(m.use_map.is_empty(),
+            "no use decls: use_map must be empty, got: {:?}", m.use_map);
+    }
+
+    #[test]
+    fn tc_use_multi_segment() {
+        // use std::vec — short name vec maps to std::vec
+        let m = lower_src("use std::vec;");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        assert_eq!(m.use_map.get("vec").map(|s| s.as_str()), Some("std::vec"),
+            "vec must resolve to std::vec, got: {:?}", m.use_map.get("vec"));
     }
 
     // ── Phase 19 M1 ──────────────────────────────────────────────────────────
