@@ -3,6 +3,10 @@ name = "axon_rt"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Enable panic_handler for standalone no_std use (not when linked with std)
+standalone = []
+
 [lib]
 crate-type = ["staticlib", "rlib"]
 

@@ -1276,7 +1276,7 @@ void axon_print_int(long long n) { printf("%lld", n); }
             .parent().unwrap();
         // P13-M3-RUSTFLAGS: force panic=abort so no_std staticlib links without eh_personality
         let rt_build = std::process::Command::new("cargo")
-            .args(&["build", "-p", "axon_rt", "--release"])
+            .args(&["build", "-p", "axon_rt", "--release", "--features", "axon_rt/standalone"])
             .current_dir(axon_root)
             .env("RUSTFLAGS", "-C panic=abort")
             .output()

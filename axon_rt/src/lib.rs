@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(feature = "standalone", no_std)]
 #![allow(clippy::module_name_repetitions)]
 
 #[repr(C)]
@@ -119,7 +119,9 @@ pub extern "C" fn axon_print_int(val: i64) {
     }
 }
 
-/// Minimal panic handler required for no_std staticlib.
+/// Minimal panic handler — active in no_std standalone builds only.
+/// Suppressed when std is available (std provides its own panic_impl).
+#[cfg(all(not(test), feature = "standalone"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
