@@ -108,6 +108,7 @@ pub fn hir_to_inf(ty: &HirTy) -> InfTy {
         HirTy::Tuple(ts)    => InfTy::Tuple(ts.iter().map(hir_to_inf).collect()),
         HirTy::Named(n, ts) => InfTy::Named(n.clone(), ts.iter().map(hir_to_inf).collect()),
         HirTy::Fn(ps, r)    => InfTy::Fn(ps.iter().map(hir_to_inf).collect(), Box::new(hir_to_inf(r))),
+        HirTy::CStr         => InfTy::Ptr(false, Box::new(InfTy::U8)), // P21-M2: CStr = *const u8
         HirTy::Param(n)     => InfTy::Named(n.clone(), vec![]), // P17-M1: param → opaque named
         HirTy::Dyn(n)       => InfTy::Named(n.clone(), vec![]),
         // P20-M1: seL4 types map to U64 in the inference engine

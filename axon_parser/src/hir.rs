@@ -139,6 +139,7 @@ pub enum HirTy {
     String,                                      // heap-owned string (distinct from Str slice)
     Unit,
     Dyn(String),
+    CStr,                                        // P21-M2: null-terminated C string pointer
     /// P20-M1: seL4 sovereign IPC types — no heap, no libc
     SeL4Endpoint,   // capability slot referencing an IPC endpoint
     SeL4Badge,      // badge value carried on IPC (u64)
@@ -165,7 +166,8 @@ impl HirTy {
             HirTy::F32 | HirTy::F64 |
             HirTy::Unit | HirTy::Ref(false, _, _) |
             HirTy::Infer | HirTy::Param(_) |
-            HirTy::SeL4Endpoint | HirTy::SeL4Badge | HirTy::SeL4MsgInfo
+            HirTy::SeL4Endpoint | HirTy::SeL4Badge | HirTy::SeL4MsgInfo |
+            HirTy::CStr
         )
     }
     pub fn is_ref(&self) -> bool { matches!(self, HirTy::Ref(_, _, _)) }
@@ -811,6 +813,7 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                     "String" => HirTy::String,
                     "()"    => HirTy::Unit,
                     // P20-M1: seL4 sovereign IPC types
+                    "CStr" | "c_str" => HirTy::CStr,
                     "sel4_endpoint" => HirTy::SeL4Endpoint,
                     "sel4_badge"    => HirTy::SeL4Badge,
                     "sel4_msginfo"  => HirTy::SeL4MsgInfo,
@@ -1366,6 +1369,50 @@ mod tests {
             assert!(matches!(&f.params[0].1, HirTy::I32),
                 "i32 param must stay HirTy::I32, got: {:?}", f.params[0].1);
         } else { panic!("expected fn"); }
+    }
+
+    // ── Phase 21 M2 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_cstr_type_lowers() {
+        // fn f(s: CStr) — param must lower to HirTy::CStr
+        let m = lower_src("fn f(s: CStr) -> i32 { return 0; }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(matches!(f.params[0].1, HirTy::CStr),
+                "CStr param must lower to HirTy::CStr, got: {:?}", f.params[0].1);
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_cstr_is_copy() {
+        assert!(HirTy::CStr.is_copy(), "CStr must be Copy — it is a ptr");
+        assert!(!HirTy::CStr.needs_drop(), "CStr must not need drop");
+    }
+
+    #[test]
+    fn tc_extern_fn_cstr_param() {
+        // extern "C" { fn puts(s: CStr) -> i32; } — CStr param in extern fn
+        let m = lower_src(r#"extern "C" { fn puts(s: CStr) -> i32; }"#);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::ExternFn(name, _, params, ret, _, _) = &m.items[0] {
+            assert_eq!(name, "puts");
+            assert!(matches!(params[0], HirTy::CStr),
+                "puts param must be CStr, got: {:?}", params[0]);
+            assert_eq!(*ret, HirTy::I32);
+        } else { panic!("expected ExternFn"); }
+    }
+
+    #[test]
+    fn tc_ffi_type_mapping() {
+        // Verify AXON types map to correct C ABI LLVM types
+        use crate::codegen::emit_llvm_ty;
+        assert_eq!(emit_llvm_ty(&HirTy::CStr),   "ptr",   "CStr must map to ptr");
+        assert_eq!(emit_llvm_ty(&HirTy::I32),    "i32",   "i32 must map to i32");
+        assert_eq!(emit_llvm_ty(&HirTy::I64),    "i64",   "i64 must map to i64");
+        assert_eq!(emit_llvm_ty(&HirTy::Bool),   "i1",    "bool must map to i1");
+        assert_eq!(emit_llvm_ty(&HirTy::F64),    "double","f64 must map to double");
+        assert_eq!(emit_llvm_ty(&HirTy::Unit),   "void",  "unit must map to void");
     }
 
     // ── Phase 21 M1 ──────────────────────────────────────────────────────────
