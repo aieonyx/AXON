@@ -295,6 +295,90 @@ mod tests {
         check(&module)
     }
 
+    // ── Phase 18 M2 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_use_after_move() {
+        // Directly inject a Moved place into checker state and verify detection.
+        use crate::hir::{HirExpr, HirExprKind, HirTy, HirLit, MoveState};
+        use crate::hir::MaybeAlias;
+        use crate::lexer::Span;
+        use crate::hir::PlaceId;
+
+        let place = PlaceId(42);
+        let span = Span::new(0, 1);
+
+        let mut checker = BorrowChecker::new();
+        // Manually mark place as Moved
+        checker.state.entry(place).or_default().move_state = Some(MoveState::Moved);
+
+        // Construct a Place expr referencing the moved place
+        let expr = HirExpr {
+            kind: HirExprKind::Place(place, MoveState::Owned),
+            ty: HirTy::I32,
+            span: span.clone(),
+            node_id: crate::hir::NodeId(0),
+            move_state: None,
+            alias: MaybeAlias::Unknown,
+        };
+        checker.check_expr(&expr);
+
+        assert!(
+            checker.errors.iter().any(|e| e.kind == BorrowErrorKind::UseAfterMove),
+            "must detect UseAfterMove, got: {:?}", checker.errors
+        );
+    }
+
+    #[test]
+    fn tc_no_error_on_owned_place() {
+        // Owned place must not trigger any error
+        use crate::hir::{HirExpr, HirExprKind, HirTy, MoveState, MaybeAlias, PlaceId};
+        use crate::lexer::Span;
+
+        let place = PlaceId(1);
+        let mut checker = BorrowChecker::new();
+        checker.state.entry(place).or_default().move_state = Some(MoveState::Owned);
+
+        let expr = HirExpr {
+            kind: HirExprKind::Place(place, MoveState::Owned),
+            ty: HirTy::I32,
+            span: Span::new(0, 1),
+            node_id: crate::hir::NodeId(0),
+            move_state: None,
+            alias: MaybeAlias::Unknown,
+        };
+        checker.check_expr(&expr);
+        assert!(checker.errors.is_empty(),
+            "owned place must have no errors, got: {:?}", checker.errors);
+    }
+
+    #[test]
+    fn tc_use_after_move_suppressed_by_unsafe_axon() {
+        // @unsafe_axon suppresses use-after-move — error is logged but suppressed=true
+        use crate::hir::{HirExpr, HirExprKind, HirTy, MoveState, MaybeAlias, PlaceId};
+        use crate::lexer::Span;
+
+        let place = PlaceId(99);
+        let mut checker = BorrowChecker::new();
+        checker.in_unsafe_axon = true;
+        checker.state.entry(place).or_default().move_state = Some(MoveState::Moved);
+
+        let expr = HirExpr {
+            kind: HirExprKind::Place(place, MoveState::Owned),
+            ty: HirTy::I32,
+            span: Span::new(0, 1),
+            node_id: crate::hir::NodeId(0),
+            move_state: None,
+            alias: MaybeAlias::Unknown,
+        };
+        checker.check_expr(&expr);
+
+        assert!(checker.errors.iter().all(|e| e.suppressed),
+            "unsafe_axon must suppress all errors, got: {:?}", checker.errors);
+        assert!(!checker.errors.is_empty(),
+            "error must still be logged even when suppressed");
+    }
+
     // ── Phase 18 M1 ──────────────────────────────────────────────────────────
 
     #[test]
