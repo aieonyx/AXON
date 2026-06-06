@@ -31,6 +31,8 @@ pub enum StdType {
     String,
     Slice(Box<HirTy>),
     BoxT(Box<HirTy>),
+    // P12-M1: iterator type
+    Iterator(Box<HirTy>),
 }
 
 impl StdType {
@@ -42,12 +44,14 @@ impl StdType {
             StdType::String       => HirTy::Named("String".into(), vec![]),
             StdType::Slice(t)     => HirTy::Slice(t.clone()),
             StdType::BoxT(t)      => HirTy::Named("Box".into(), vec![*t.clone()]),
+            // P12-M1
+            StdType::Iterator(t) => HirTy::Named("AxonIterator".into(), vec![*t.clone()]),
         }
     }
 
     pub fn needs_drop(&self) -> bool {
         // 7E-5: all stdlib heap types need drop
-        matches!(self, StdType::Vec(_) | StdType::String | StdType::BoxT(_) | StdType::Result(_, _))
+        matches!(self, StdType::Vec(_) | StdType::String | StdType::BoxT(_) | StdType::Result(_, _) | StdType::Iterator(_))
     }
 
     pub fn is_copy(&self) -> bool {
@@ -318,6 +322,8 @@ pub fn stdlib_ir_declarations() -> &'static str {
 declare void @axon_print(ptr)\n\
 declare void @axon_println(ptr)\n\
 declare void @axon_print_int(i64)\n\
+; P12-M1: iterator protocol\n\
+declare ptr @axon_iter_next(ptr)\n\
 ; === end stdlib ===\n"
 }
 
@@ -347,6 +353,11 @@ pub fn lookup_stdlib_type(name: &str, args: Vec<HirTy>) -> Option<StdType> {
         "Box"    => {
             let inner = args.into_iter().next().unwrap_or(HirTy::Infer);
             Some(StdType::BoxT(Box::new(inner)))
+        }
+        // P12-M1
+        "AxonIterator" | "Iterator" => {
+            let inner = args.into_iter().next().unwrap_or(HirTy::Infer);
+            Some(StdType::Iterator(Box::new(inner)))
         }
         _ => None,
     }
@@ -480,4 +491,31 @@ mod tests {
         axon_print("");
         axon_print_int(42);
     }
+    #[test]
+    fn td16_iterator_type_lookup() {
+        let st = lookup_stdlib_type("AxonIterator", vec![crate::hir::HirTy::I64]);
+        assert!(st.is_some());
+        let st = st.unwrap();
+        assert!(st.needs_drop());
+        let hty = st.to_hir_ty();
+        assert_eq!(hty, crate::hir::HirTy::Named("AxonIterator".into(), vec![crate::hir::HirTy::I64]));
+    }
+
+    #[test]
+    fn td17_iterator_alias_lookup() {
+        // "Iterator" is an accepted alias for "AxonIterator"
+        let st = lookup_stdlib_type("Iterator", vec![crate::hir::HirTy::Bool]);
+        assert!(st.is_some());
+    }
+
+    #[test]
+    fn td18_iterator_no_inner_defaults_to_infer() {
+        let st = lookup_stdlib_type("AxonIterator", vec![]);
+        assert!(st.is_some());
+        let hty = st.unwrap().to_hir_ty();
+        assert_eq!(hty, crate::hir::HirTy::Named("AxonIterator".into(), vec![crate::hir::HirTy::Infer]));
+    }
+
 }
+
+// P12-M1-APPLIED
