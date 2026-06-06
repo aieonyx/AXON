@@ -1,158 +1,120 @@
-// ── DWC modules (SPEC: 6A-01) ─────────────────────────────────
-pub mod monotonic;
-pub mod witness;
-pub mod witness_analysis;
+#![no_std]
+#![allow(clippy::module_name_repetitions)]
 
-pub use witness::{
-    ContractId, ContractViolation, OverflowPolicy, SourceLocation,
-    Verdict, WitnessKind, WitnessPayload, WitnessRecord, WitnessStore,
-    store,
-};
-pub use witness_analysis::{NullAnalyser, WitnessAnalyser};
-pub use monotonic::monotonic_ns;
-
-// ============================================================
-// axon_rt — AXON Runtime
-// Copyright © 2026 Edison Lepiten — AIEONYX
-// github.com/aieonyx/axon
-//
-// Provides runtime support for AXON-transpiled Rust programs:
-//   - defer()     — RAII scope guard (AXON 'defer' statement)
-//   - Deferred    — the guard type
-//   - with scopes — handled via Rust's own drop semantics
-//
-// This crate is automatically linked into all AXON programs.
-// It is intentionally minimal — no_std compatible by design.
-// ============================================================
-
-// ── Defer Guard ───────────────────────────────────────────────
-//
-// AXON:
-//   let@ channel = ipc.open_channel()?
-//   defer channel.close()
-//
-// Generated Rust:
-//   let channel = ipc.open_channel()?;
-//   let _guard = axon_rt::defer(|| channel.close());
-//
-// When `_guard` goes out of scope (any exit path), it calls
-// channel.close() — matching AXON's defer semantics exactly.
-
-/// A scope guard that executes a closure when dropped.
-/// Created by the `defer` function — never construct directly.
-pub struct Deferred<F: FnOnce()> {
-    action: Option<F>,
+#[repr(C)]
+pub struct AxonIterResult {
+    pub tag: i8,
+    pub value: i64,
 }
 
-impl<F: FnOnce()> Drop for Deferred<F> {
-    fn drop(&mut self) {
-        if let Some(f) = self.action.take() {
-            f();
+#[repr(C)]
+pub struct RangeIterator {
+    pub current: i64,
+    pub end: i64,
+}
+
+static mut RANGE_BUF: RangeIterator = RangeIterator { current: 0, end: 0 };
+
+#[no_mangle]
+pub extern "C" fn axon_range_new(start: i64, end: i64) -> *mut RangeIterator {
+    unsafe {
+        // SAFETY: Single-threaded MVP; sole writer to static RANGE_BUF.
+        let ptr = core::ptr::addr_of_mut!(RANGE_BUF);
+        (*ptr).current = start;
+        (*ptr).end = end;
+        ptr
+    }
+}
+
+/// # Safety
+/// `iter` must be a non-null pointer returned by `axon_range_new`.
+// P13-M2-UNSAFE-FIX
+#[no_mangle]
+pub unsafe extern "C" fn axon_iter_next(iter: *mut RangeIterator) -> AxonIterResult {
+    unsafe {
+        // SAFETY: iter is a non-null pointer returned by axon_range_new.
+        let r = &mut *iter;
+        if r.current < r.end {
+            let val = r.current;
+            r.current += 1;
+            AxonIterResult { tag: 1, value: val }
+        } else {
+            AxonIterResult { tag: 0, value: 0 }
         }
     }
 }
 
-/// Create a deferred action that runs when the returned guard
-/// goes out of scope. Equivalent to AXON's `defer expr` statement.
+/// # Safety
+/// `iter` must be a non-null pointer returned by `axon_range_new`.
+#[no_mangle]
+pub unsafe extern "C" fn axon_iter_drop(iter: *mut RangeIterator) {
+    unsafe {
+        // SAFETY: iter is a non-null pointer returned by axon_range_new.
+        let r = &mut *iter;
+        r.current = r.end;
+    }
+}
+
+/// Write `count` bytes from `buf` to file descriptor `fd` via Linux syscall.
 ///
-/// # Example
-/// ```rust
-/// let _guard = axon_rt::defer(|| println!("cleaned up"));
-/// // "cleaned up" prints when _guard is dropped
-/// ```
-pub fn defer<F: FnOnce()>(action: F) -> Deferred<F> {
-    Deferred { action: Some(action) }
+/// # Safety
+/// `buf` must be valid for `count` bytes. `fd` must be a valid open descriptor.
+unsafe fn sys_write(fd: i32, buf: *const u8, count: usize) -> isize {
+    let ret: i64;
+    core::arch::asm!(
+        "syscall",
+        in("rax") 1u64,
+        in("rdi") fd as u64,
+        in("rsi") buf as u64,
+        in("rdx") count as u64,
+        out("rcx") _,
+        out("r11") _,
+        lateout("rax") ret,
+    );
+    ret as isize
 }
 
-// ── Capability Stubs ──────────────────────────────────────────
-// Placeholder until axon_std implements real capabilities.
-// Phase 3 stubs — Phase 5 replaces with seL4 capability calls.
+#[no_mangle]
+pub extern "C" fn axon_print_int(val: i64) {
+    let mut buf = [0u8; 21];
+    let mut pos = 0usize;
+    let mut v = val;
 
-/// Mark a value as capability-pinned (stub for Phase 3)
-#[inline(always)]
-pub fn cap_pin<T>(value: T) -> T { value }
-
-// ── Provenance Stubs ──────────────────────────────────────────
-
-/// Mark data as tainted (stub — Phase 5 enforces at type level)
-#[inline(always)]
-pub fn taint<T>(value: T) -> T { value }
-
-/// Assert data is clean (stub — Phase 5 verifies statically)
-#[inline(always)]
-pub fn clean<T>(value: T) -> T { value }
-
-// ── Tests ─────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-
-    #[test]
-    fn test_defer_runs_on_drop() {
-        let ran = Arc::new(Mutex::new(false));
-        let ran_clone = ran.clone();
-        {
-            let _guard = defer(move || {
-                *ran_clone.lock().unwrap() = true;
-            });
-            assert!(!*ran.lock().unwrap(), "should not have run yet");
+    if v < 0 {
+        buf[pos] = b'-';
+        pos += 1;
+        if v == i64::MIN {
+            let min_str = b"-9223372036854775808\n";
+            unsafe {
+                // SAFETY: min_str is a valid static byte slice; fd 1 is stdout.
+                sys_write(1, min_str.as_ptr(), min_str.len());
+            }
+            return;
         }
-        assert!(*ran.lock().unwrap(), "defer should have run on drop");
+        v = -v;
     }
 
-    #[test]
-    fn test_defer_runs_on_early_return() {
-        let ran = Arc::new(Mutex::new(false));
-        let ran_clone = ran.clone();
-
-        fn early(ran: Arc<Mutex<bool>>) {
-            let _guard = defer(move || {
-                *ran.lock().unwrap() = true;
-            });
-            return; // early exit
+    if v == 0 {
+        buf[pos] = b'0';
+        pos += 1;
+    } else {
+        let mut tmp = [0u8; 20];
+        let mut tpos = 0usize;
+        while v > 0 {
+            tmp[tpos] = b'0' + (v % 10) as u8;
+            tpos += 1;
+            v /= 10;
         }
-
-        early(ran_clone);
-        assert!(*ran.lock().unwrap(), "defer should run on early return");
+        for i in (0..tpos).rev() {
+            buf[pos] = tmp[i];
+            pos += 1;
+        }
     }
+    buf[pos] = b'\n';
+    pos += 1;
 
-    #[test]
-    fn test_defer_lifo_order() {
-        let order = Arc::new(Mutex::new(Vec::new()));
-        {
-            let o1 = order.clone();
-            let _g1 = defer(move || o1.lock().unwrap().push(1));
-            let o2 = order.clone();
-            let _g2 = defer(move || o2.lock().unwrap().push(2));
-            let o3 = order.clone();
-            let _g3 = defer(move || o3.lock().unwrap().push(3));
-        }
-        // LIFO — last deferred runs first
-        assert_eq!(*order.lock().unwrap(), vec![3, 2, 1]);
-    }
-
-    #[test]
-    fn test_defer_with_axon_classify_pattern() {
-        // Simulate the Aegis Monitor pattern:
-        //   let@ channel = open()?
-        //   defer channel.close()
-        let closed = Arc::new(Mutex::new(false));
-        let closed_clone = closed.clone();
-
-        struct FakeChannel { closed: Arc<Mutex<bool>> }
-        impl FakeChannel {
-            fn close(self) { *self.closed.lock().unwrap() = true; }
-        }
-
-        let channel = FakeChannel { closed: closed_clone };
-        {
-            let _guard = defer(move || channel.close());
-            // channel is in use here
-            assert!(!*closed.lock().unwrap());
-        }
-        assert!(*closed.lock().unwrap(), "channel should be closed after scope");
+    unsafe {
+        // SAFETY: buf is valid for pos bytes; fd 1 is stdout.
+        sys_write(1, buf.as_ptr(), pos);
     }
 }
-pub mod temporal;
