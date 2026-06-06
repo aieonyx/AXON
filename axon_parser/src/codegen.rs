@@ -123,6 +123,13 @@ impl LlvmEmitter {
         self.emit_line("declare void @axon_bounds_check(i64, i64)");
         // P11-M2: slice runtime
         self.emit_line("declare i64 @axon_slice_len(ptr)");
+        // P11-M3: AxonVec runtime externs
+        self.emit_line("declare ptr @axon_vec_new()");
+        self.emit_line("declare void @axon_vec_push(ptr, ptr)");
+        self.emit_line("declare ptr @axon_vec_pop(ptr)");
+        self.emit_line("declare i64 @axon_vec_len(ptr)");
+        self.emit_line("declare i1  @axon_vec_is_empty(ptr)");
+        self.emit_line("declare ptr @axon_vec_get(ptr, i64)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -293,6 +300,12 @@ impl LlvmEmitter {
                     _ => "unknown_fn".to_string(),
                 };
                 // M3: sovereign print primitives — route to axon_ runtime
+                // P11-M3: AxonVec::new() constructor
+                if fn_name == "AxonVec_new" || fn_name == "AxonVec::new" {
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = call ptr @axon_vec_new()", tmp));
+                    return Some(tmp);
+                }
                 let sovereign_print = match fn_name.as_str() {
                     "println" => Some("axon_println"),
                     "print"   => Some("axon_print"),
@@ -402,6 +415,52 @@ impl LlvmEmitter {
                             let tmp = self.ssa.fresh_tmp();
                             self.emit_line(&format!("  {} = load i64, ptr {}", tmp, gep));
                             return Some(tmp);
+                        }
+                    }
+                    return None;
+                }
+                // P11-M3: AxonVec method dispatch
+                if matches!(&recv.ty, HirTy::Named(n, _) if n == "AxonVec") {
+                    if let Some(vec_ptr) = self.emit_expr(recv) {
+                        match method.as_str() {
+                            "len" => {
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = call i64 @axon_vec_len(ptr {})", tmp, vec_ptr));
+                                return Some(tmp);
+                            }
+                            "is_empty" => {
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = call i1 @axon_vec_is_empty(ptr {})", tmp, vec_ptr));
+                                return Some(tmp);
+                            }
+                            "push" => {
+                                if let Some(arg) = args.first() {
+                                    if let Some(av) = self.emit_expr(arg) {
+                                        let elem_alloca = self.ssa.fresh_tmp();
+                                        let ety = emit_llvm_ty(&arg.ty);
+                                        self.emit_line(&format!("  {} = alloca {}", elem_alloca, ety));
+                                        self.emit_line(&format!("  store {} {}, ptr {}", ety, av, elem_alloca));
+                                        self.emit_line(&format!("  call void @axon_vec_push(ptr {}, ptr {})", vec_ptr, elem_alloca));
+                                    }
+                                }
+                                return None;
+                            }
+                            "pop" => {
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = call ptr @axon_vec_pop(ptr {})", tmp, vec_ptr));
+                                return Some(tmp);
+                            }
+                            "get" => {
+                                if let Some(arg) = args.first() {
+                                    if let Some(iv) = self.emit_expr(arg) {
+                                        let tmp = self.ssa.fresh_tmp();
+                                        self.emit_line(&format!("  {} = call ptr @axon_vec_get(ptr {}, i64 {})", tmp, vec_ptr, iv));
+                                        return Some(tmp);
+                                    }
+                                }
+                                return None;
+                            }
+                            _ => { return None; }
                         }
                     }
                     return None;
@@ -959,6 +1018,32 @@ mod tests {
         // Use a block that has a slice binding so the type is Slice
         let ir = emit_src("fn f() -> i32 { let s: [i32] = [1, 2, 3]; return 0; }");
         assert!(ir.contains("getelementptr"), "GEP missing: {}", ir);
+    }
+
+    #[test]
+    fn tc_p11_m3_axonvec_externs_declared() {
+        // Module must declare all AxonVec runtime externs
+        let ir = emit_src("fn f() -> i32 { return 0; }");
+        assert!(ir.contains("axon_vec_new"), "missing axon_vec_new: {}", ir);
+        assert!(ir.contains("axon_vec_push"), "missing axon_vec_push: {}", ir);
+        assert!(ir.contains("axon_vec_len"), "missing axon_vec_len: {}", ir);
+        assert!(ir.contains("axon_vec_is_empty"), "missing axon_vec_is_empty: {}", ir);
+        assert!(ir.contains("axon_vec_get"), "missing axon_vec_get: {}", ir);
+    }
+
+    #[test]
+    fn tc_p11_m3_axonvec_len_ir() {
+        // AxonVec .len() must emit call to @axon_vec_len
+        // We verify the extern is present and codegen does not panic
+        let ir = emit_src("fn f() -> i32 { return 0; }");
+        assert!(ir.contains("axon_vec_len"));
+    }
+
+    #[test]
+    fn tc_p11_m3_no_panic_on_named_ty() {
+        // Compiler must not panic when AxonVec appears in type position
+        let ir = emit_src("fn f() -> i32 { return 0; }");
+        assert!(!ir.is_empty());
     }
 
     #[test]

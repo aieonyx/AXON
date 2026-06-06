@@ -389,7 +389,11 @@ fn hir_ty_contains_string(ty: &HirTy) -> bool {
             hir_ty_contains_string(inner),
         HirTy::Array(inner, _) => hir_ty_contains_string(inner),
         HirTy::Tuple(ts) => ts.iter().any(hir_ty_contains_string),
-        HirTy::Named(_, ts) => ts.iter().any(hir_ty_contains_string),
+        HirTy::Named(n, ts) => {
+            // P11-M3: AxonVec always requires alloc_heap
+            if n == "AxonVec" { return true; }
+            ts.iter().any(hir_ty_contains_string)
+        }
         HirTy::Fn(ps, r) =>
             ps.iter().any(hir_ty_contains_string) || hir_ty_contains_string(r),
         _ => false,
