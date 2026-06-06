@@ -1507,6 +1507,38 @@ fn main() -> i32 { return 0; }
         assert!(ir.contains("phi i32"), "missing phi merge for match");
     }
 
+    // ── Phase 21 M4 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_p21_integration() {
+        // Full program: extern block + AXON fn calling foreign fn.
+        // extern "C" { fn puts(s: CStr) -> i32; }
+        // fn greet() -> i32 — calls puts, IR must have both declare and call.
+        let src = r#"
+            extern "C" { fn puts(s: CStr) -> i32; }
+            fn greet(msg: CStr) -> i32 {
+                return puts(msg);
+            }
+        "#;
+        let ir = emit_src(src);
+
+        // extern declare present
+        assert!(ir.contains("declare i32 @puts"),
+            "IR must declare puts, got:\n{}", ir);
+
+        // AXON fn calling puts emits call instruction
+        assert!(ir.contains("@puts"),
+            "IR must contain call to @puts, got:\n{}", ir);
+
+        // greet is internal (non-pub)
+        assert!(ir.contains("internal"),
+            "non-pub greet must be internal, got:\n{}", ir);
+
+        // CStr param emits as ptr
+        assert!(ir.contains("ptr"),
+            "CStr must emit as ptr in IR, got:\n{}", ir);
+    }
+
     // ── Phase 21 M3 ──────────────────────────────────────────────────────────
 
     #[test]
