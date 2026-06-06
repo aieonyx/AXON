@@ -559,6 +559,17 @@ impl ConstraintGen {
                 let recv_ty = self.generate_expr(recv);
                 for arg in args { self.generate_expr(arg); }
                 // M2: String method return types
+                // P11-M3: AxonVec method return types
+                if matches!(&recv_ty, InfTy::Named(n, _) if n == "AxonVec") {
+                    return match method.as_str() {
+                        "len"      => InfTy::Usize,
+                        "is_empty" => InfTy::Bool,
+                        "push"     => InfTy::Unit,
+                        "pop"      => self.fresh_var(),
+                        "get"      => self.fresh_var(),
+                        _          => self.fresh_var(),
+                    };
+                }
                 // P11-M2: slice method return types
                 if matches!(recv_ty, InfTy::Slice(_)) {
                     return match method.as_str() {
