@@ -570,12 +570,23 @@ impl ConstraintGen {
                         _          => self.fresh_var(),
                     };
                 }
-                // P12-M1: AxonIterator method resolution
+                // P12-M1+M3: AxonIterator method resolution
                 if matches!(&recv_ty, InfTy::Named(n, _) if n == "AxonIterator") {
+                    // consume args so inference sees them
                     return match method.as_str() {
-                        // next() -> Option<T>  (fresh var for item type)
-                        "next" => InfTy::Named("Option".into(), vec![self.fresh_var()]),
-                        _      => self.fresh_var(),
+                        // next() -> Option<T>
+                        "next"      => InfTy::Named("Option".into(), vec![self.fresh_var()]),
+                        // map(f) -> AxonIterator<U>
+                        "map"       => InfTy::Named("AxonIterator".into(), vec![self.fresh_var()]),
+                        // filter(f) -> AxonIterator<T>  (same item, fresh var)
+                        "filter"    => InfTy::Named("AxonIterator".into(), vec![self.fresh_var()]),
+                        // fold(init, f) -> accumulator (fresh var)
+                        "fold"      => self.fresh_var(),
+                        // enumerate() -> AxonIterator<(index, T)>  (fresh var for now)
+                        "enumerate" => InfTy::Named("AxonIterator".into(), vec![self.fresh_var()]),
+                        // collect() -> Vec<T>
+                        "collect"   => InfTy::Named("Vec".into(), vec![self.fresh_var()]),
+                        _           => self.fresh_var(),
                     };
                 }
                 // P12-M2: Range method resolution
@@ -919,3 +930,5 @@ mod tests {
 // P12-M1-APPLIED
 
 // P12-M2-APPLIED
+
+// P12-M3-APPLIED
