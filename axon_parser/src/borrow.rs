@@ -295,6 +295,105 @@ mod tests {
         check(&module)
     }
 
+    // ── Phase 18 M3 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_double_mut_borrow() {
+        // Second &mut on same place must emit DoubleMutBorrow
+        use crate::hir::{HirExpr, HirExprKind, HirTy, MoveState, MaybeAlias, PlaceId, BorrowId};
+        use crate::lexer::Span;
+
+        let place = PlaceId(7);
+        let span = Span::new(0, 1);
+        let mut checker = BorrowChecker::new();
+        checker.state.entry(place).or_default().move_state = Some(MoveState::Owned);
+
+        // First &mut — should succeed (no error)
+        let ref1 = HirExpr {
+            kind: HirExprKind::Ref(true, place, BorrowId(1)),
+            ty: HirTy::I32,
+            span: span.clone(),
+            node_id: crate::hir::NodeId(0),
+            move_state: None,
+            alias: MaybeAlias::Unknown,
+        };
+        checker.check_expr(&ref1);
+        assert!(checker.errors.is_empty(),
+            "first &mut must not error, got: {:?}", checker.errors);
+
+        // Second &mut — must emit DoubleMutBorrow
+        let ref2 = HirExpr {
+            kind: HirExprKind::Ref(true, place, BorrowId(2)),
+            ty: HirTy::I32,
+            span: span.clone(),
+            node_id: crate::hir::NodeId(0),
+            move_state: None,
+            alias: MaybeAlias::Unknown,
+        };
+        checker.check_expr(&ref2);
+        assert!(
+            checker.errors.iter().any(|e| e.kind == BorrowErrorKind::DoubleMutBorrow),
+            "second &mut must emit DoubleMutBorrow, got: {:?}", checker.errors
+        );
+    }
+
+    #[test]
+    fn tc_shared_borrow_no_error() {
+        // Two shared borrows on same place must not error
+        use crate::hir::{HirExpr, HirExprKind, HirTy, MoveState, MaybeAlias, PlaceId, BorrowId};
+        use crate::lexer::Span;
+
+        let place = PlaceId(8);
+        let span = Span::new(0, 1);
+        let mut checker = BorrowChecker::new();
+        checker.state.entry(place).or_default().move_state = Some(MoveState::Owned);
+
+        for bid in [1u32, 2] {
+            let expr = HirExpr {
+                kind: HirExprKind::Ref(false, place, BorrowId(bid)),
+                ty: HirTy::I32,
+                span: span.clone(),
+                node_id: crate::hir::NodeId(0),
+                move_state: None,
+                alias: MaybeAlias::Unknown,
+            };
+            checker.check_expr(&expr);
+        }
+        assert!(checker.errors.is_empty(),
+            "shared borrows must not error, got: {:?}", checker.errors);
+    }
+
+    #[test]
+    fn tc_use_while_mut_borrowed() {
+        // Reading a place while it is mutably borrowed must emit UseWhileMutBorrowed
+        use crate::hir::{HirExpr, HirExprKind, HirTy, MoveState, MaybeAlias, PlaceId, BorrowId};
+        use crate::lexer::Span;
+
+        let place = PlaceId(9);
+        let span = Span::new(0, 1);
+        let mut checker = BorrowChecker::new();
+
+        // Mark place as already mut borrowed
+        let ps = checker.state.entry(place).or_default();
+        ps.move_state = Some(MoveState::MutBorrowed);
+        ps.mut_borrows.push(BorrowId(1));
+
+        // Try to read it
+        let expr = HirExpr {
+            kind: HirExprKind::Place(place, MoveState::Owned),
+            ty: HirTy::I32,
+            span: span.clone(),
+            node_id: crate::hir::NodeId(0),
+            move_state: None,
+            alias: MaybeAlias::Unknown,
+        };
+        checker.check_expr(&expr);
+        assert!(
+            checker.errors.iter().any(|e| e.kind == BorrowErrorKind::UseWhileMutBorrowed),
+            "must detect UseWhileMutBorrowed, got: {:?}", checker.errors
+        );
+    }
+
     // ── Phase 18 M2 ──────────────────────────────────────────────────────────
 
     #[test]
