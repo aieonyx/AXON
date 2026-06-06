@@ -10,3 +10,4 @@ fuzz_24h*.log
 nohup.out
 *.log
 .aider*
+patch_p*.py
