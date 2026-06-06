@@ -352,6 +352,8 @@ pub enum HirItem {
     Impl(HirImpl),
     Const(String, HirTy, HirExpr, Span),
     TypeAlias(String, HirTy, Span),
+    /// P19-M1: mod block — name + lowered items
+    Module(String, Vec<HirItem>),
 }
 
 // ============================================================
@@ -615,7 +617,14 @@ impl HirLowerer {
             Item::TypeAlias(name, _, ty, span) => {
                 Some(HirItem::TypeAlias(name.name, self.lower_ty(&ty), span))
             }
-            Item::Use(_, _) | Item::Mod(_, _, _) | Item::Profile(_) => None,
+            Item::Use(_, _) | Item::Profile(_) => None,
+            Item::Mod(name, items, _) => {
+                // P19-M1: lower mod block — recursively lower inner items
+                let hir_items: Vec<HirItem> = items.into_iter()
+                    .filter_map(|i| self.lower_item(i))
+                    .collect();
+                Some(HirItem::Module(name.name, hir_items))
+            }
         }
     }
 
@@ -1272,6 +1281,49 @@ mod tests {
             assert!(matches!(&f.params[0].1, HirTy::I32),
                 "i32 param must stay HirTy::I32, got: {:?}", f.params[0].1);
         } else { panic!("expected fn"); }
+    }
+
+    // ── Phase 19 M1 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_mod_lowers() {
+        // mod foo { fn bar(x: i32) -> i32 { return x; } } must produce HirItem::Module
+        let m = lower_src("mod foo { fn bar(x: i32) -> i32 { return x; } }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        assert_eq!(m.items.len(), 1, "must have 1 top-level item");
+        if let HirItem::Module(name, items) = &m.items[0] {
+            assert_eq!(name, "foo", "module name must be foo");
+            assert_eq!(items.len(), 1, "module must contain 1 item");
+            assert!(matches!(items[0], HirItem::Fn(_)),
+                "inner item must be HirItem::Fn");
+        } else {
+            panic!("expected HirItem::Module, got: {:?}", m.items[0]);
+        }
+    }
+
+    #[test]
+    fn tc_mod_nested() {
+        // mod outer { mod inner { fn f(x: i32) -> i32 { return x; } } }
+        let m = lower_src("mod outer { mod inner { fn f(x: i32) -> i32 { return x; } } }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Module(name, items) = &m.items[0] {
+            assert_eq!(name, "outer");
+            if let HirItem::Module(inner_name, inner_items) = &items[0] {
+                assert_eq!(inner_name, "inner");
+                assert!(matches!(inner_items[0], HirItem::Fn(_)));
+            } else { panic!("expected inner Module"); }
+        } else { panic!("expected outer Module"); }
+    }
+
+    #[test]
+    fn tc_mod_empty() {
+        // Empty mod block must produce HirItem::Module with empty items
+        let m = lower_src("mod empty { }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Module(name, items) = &m.items[0] {
+            assert_eq!(name, "empty");
+            assert!(items.is_empty(), "empty mod must have no items");
+        } else { panic!("expected HirItem::Module"); }
     }
 
     fn lower_src(src: &str) -> HirModule {

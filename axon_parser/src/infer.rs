@@ -492,6 +492,9 @@ impl ConstraintGen {
                 self.emit(ety, hty, ConstraintOrigin::Explicit);
             }
             HirItem::TypeAlias(_, _, _) => {}
+            HirItem::Module(_, items) => {
+                for item in items { self.generate_item(item); }
+            }
         }
     }
 
