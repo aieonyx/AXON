@@ -130,6 +130,9 @@ impl LlvmEmitter {
         self.emit_line("declare i64 @axon_vec_len(ptr)");
         self.emit_line("declare i1  @axon_vec_is_empty(ptr)");
         self.emit_line("declare ptr @axon_vec_get(ptr, i64)");
+        // P12-M4: iterator runtime externs
+        self.emit_line("declare ptr @axon_range_new(i64, i64)");
+        self.emit_line("declare ptr @axon_iter_next(ptr)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -507,8 +510,8 @@ impl LlvmEmitter {
                 Some(tmp)
             }
             // P12-M4: for-loop over iterator
-            HirExprKind::For(_pat, iter, body) => {
-                let n = self.ssa.tmp_counter; self.ssa.tmp_counter += 4;
+            HirExprKind::For(pat, iter, body) => {
+                let n = self.ssa.tmp_counter; self.ssa.tmp_counter += 3;
                 let loop_l = format!("for_loop_{}", n);
                 let body_l = format!("for_body_{}", n + 1);
                 let exit_l = format!("for_exit_{}", n + 2);
@@ -533,6 +536,21 @@ impl LlvmEmitter {
                     "  br i1 {}, label %{}, label %{}", cond, exit_l, body_l
                 ));
                 self.emit_line(&format!("{}:", body_l));
+                // P12-M4 audit fix: extract value field and bind to loop variable
+                if let crate::hir::HirPat::Bind(place_id, _) = pat {
+                    let val_ptr = self.ssa.fresh_tmp();
+                    let val     = self.ssa.fresh_tmp();
+                    self.emit_line(&format!(
+                        "  {} = getelementptr inbounds {{i8, i64}}, ptr {}, i32 0, i32 1",
+                        val_ptr, opt
+                    ));
+                    self.emit_line(&format!("  {} = load i64, ptr {}", val, val_ptr));
+                    // alloca for the loop variable
+                    let alloca = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = alloca i64", alloca));
+                    self.emit_line(&format!("  store i64 {}, ptr {}", val, alloca));
+                    self.ssa.place_map.insert(*place_id, alloca);
+                }
                 self.emit_expr(body);
                 self.emit_line(&format!("  br label %{}", loop_l));
                 self.emit_line(&format!("{}:", exit_l));
