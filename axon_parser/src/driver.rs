@@ -10,7 +10,7 @@
 //   compile_sources(sources: &[&str]) -> HirModule
 //   merge_modules(a: HirModule, b: HirModule) -> HirModule
 
-use crate::hir::{HirModule, HirItem, HirError};
+use crate::hir::{HirModule, HirError};
 use crate::parser::parse;
 use std::collections::HashMap;
 
@@ -102,6 +102,35 @@ pub fn compile_files(paths: &[&str]) -> HirModule {
 mod tests {
     use super::*;
     use crate::hir::HirItem;
+
+    // ── Phase 19 M4 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_p19_integration() {
+        // Full program: mod block + use declaration + multi-file merge.
+        // File 1: defines mod math with fn add
+        // File 2: uses math::add
+        // Merged module must have both the Module item and the use_map entry.
+        let src1 = r#"
+            mod math {
+                fn add(x: i32, y: i32) -> i32 { return x; }
+            }
+        "#;
+        let src2 = "use math::add;";
+
+        let m = compile_sources(&[src1, src2]);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+
+        // mod math present
+        assert!(m.items.iter().any(|i| matches!(i, crate::hir::HirItem::Module(n, _) if n == "math")),
+            "must contain mod math, items: {:?}", m.items.len());
+
+        // use math::add resolved
+        assert!(m.use_map.contains_key("add"),
+            "use_map must contain add, got: {:?}", m.use_map);
+        assert_eq!(m.use_map.get("add").map(|s| s.as_str()), Some("math::add"),
+            "add must resolve to math::add");
+    }
 
     // ── Phase 19 M3 ──────────────────────────────────────────────────────────
 
