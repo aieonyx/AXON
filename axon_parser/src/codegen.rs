@@ -34,6 +34,7 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::Unit   => "void",
         HirTy::Param(_) => "i64", // P17-M1: uninstantiated generic — conservative i64
         HirTy::Dyn(_)  => "ptr",
+        HirTy::CStr    => "ptr", // P21-M2: C string is a null-terminated ptr
         // P20-M1: seL4 IPC types — capability slots are u64 words in seL4 ABI
         HirTy::SeL4Endpoint => "i64",
         HirTy::SeL4Badge    => "i64",
