@@ -717,7 +717,34 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                 HirExprKind::Block(hstmts, htail)
             }
             Expr::Call(func, args, _) => {
-                let hfunc = self.lower_expr(*func);
+                // P13-M3-CALL-PATH: if callee is an ident or path, lower as Path
+                // so codegen can resolve the function name — not as a Place lookup
+                let hfunc = match *func {
+                    Expr::Ident(ref ident) => {
+                        // P13-M3-HIREXPR-FIX
+                        let segs = vec![ident.name.clone()];
+                        HirExpr {
+                            kind: HirExprKind::Path(segs),
+                            ty: HirTy::Infer,
+                            node_id: self.fresh_node(),
+                            span: Span::new(0, 0),
+                            move_state: None,
+                            alias: MaybeAlias::Unknown,
+                        }
+                    }
+                    Expr::Path(ref segs, _) => {
+                        let names = segs.iter().map(|s| s.name.clone()).collect();
+                        HirExpr {
+                            kind: HirExprKind::Path(names),
+                            ty: HirTy::Infer,
+                            node_id: self.fresh_node(),
+                            span: Span::new(0, 0),
+                            move_state: None,
+                            alias: MaybeAlias::Unknown,
+                        }
+                    }
+                    other => self.lower_expr(other),
+                };
                 let hargs = args.into_iter().map(|a| self.lower_expr(a)).collect();
                 HirExprKind::Call(Box::new(hfunc), hargs)
             }
@@ -766,9 +793,13 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                 HirExprKind::Loop(Box::new(self.lower_expr(*body)))
             }
             Expr::For(pat, iter, body, _) => {
-                let hpat = self.lower_pat(pat);
+                // P13-M3-FOR-SCOPE: lower iter first (before scope push),
+                // then push scope, lower pat (binds name), lower body, pop scope
                 let hiter = self.lower_expr(*iter);
+                self.push_scope();
+                let hpat = self.lower_pat(pat);
                 let hbody = self.lower_expr(*body);
+                self.pop_scope();
                 HirExprKind::For(hpat, Box::new(hiter), Box::new(hbody))
             }
             Expr::Match(scrutinee, arms, _) => {
@@ -900,8 +931,15 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
     fn lower_pat(&mut self, pat: Pat) -> HirPat {
         match pat {
             Pat::Wildcard(_) => HirPat::Wildcard,
-            Pat::Ident(_, is_mut) => {
-                let place = self.fresh_place();
+            Pat::Ident(ref ident, is_mut) => {
+                // P13-M3-FOR-SCOPE: reuse existing place if name already bound,
+                // otherwise allocate fresh and bind so body lookups resolve correctly
+                let place = self.lookup_name(&ident.name)
+                    .unwrap_or_else(|| {
+                        let p = self.fresh_place();
+                        self.bind_name(ident.name.clone(), p);
+                        p
+                    });
                 HirPat::Bind(place, is_mut)
             }
             Pat::Tuple(pats, _) => {

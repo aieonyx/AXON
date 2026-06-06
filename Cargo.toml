@@ -36,3 +36,9 @@ description = "AXON — AI-Native Programming Language"
 authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
 license     = "SEE LICENSE FILE"
 repository  = "https://github.com/aieonyx/axon"
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
