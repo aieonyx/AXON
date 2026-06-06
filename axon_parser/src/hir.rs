@@ -203,6 +203,8 @@ pub enum HirExprKind {
     Cast(Box<HirExpr>, HirTy),
     Tuple(Vec<HirExpr>),
     Array(Vec<HirExpr>),
+    // P12-M2: range expression  start..end  (inclusive flag)
+    Range(Box<HirExpr>, Box<HirExpr>, bool),
     Struct(String, Vec<(String, HirExpr)>),
     Path(Vec<String>),
     // Drop elaboration — inserted by HIR lowerer
@@ -813,11 +815,29 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
             Expr::Path(segs, _) => {
                 HirExprKind::Path(segs.into_iter().map(|s| s.name).collect())
             }
-            Expr::Range(_, _, _, _) => {
-                // DEFERRED H6: Range lowering not yet implemented.
-                // Placeholder unit literal used until Stage 8B.
-                // WARNING: For loops over ranges will not work correctly until 8B.
-                HirExprKind::Lit(HirLit::Unit)
+            Expr::Range(start, end, inclusive, _) => {
+                // P12-M2: lower 0..n to HirExprKind::Range
+                let hstart = start
+                    .map(|e| self.lower_expr(*e))
+                    .unwrap_or_else(|| HirExpr {
+                        kind: HirExprKind::Lit(HirLit::Int(0)),
+                        ty: HirTy::I64,
+                        span: span.clone(),
+                        node_id,
+                        move_state: None,
+                        alias: MaybeAlias::Unknown,
+                    });
+                let hend = end
+                    .map(|e| self.lower_expr(*e))
+                    .unwrap_or_else(|| HirExpr {
+                        kind: HirExprKind::Lit(HirLit::Int(0)),
+                        ty: HirTy::I64,
+                        span: span.clone(),
+                        node_id,
+                        move_state: None,
+                        alias: MaybeAlias::Unknown,
+                    });
+                HirExprKind::Range(Box::new(hstart), Box::new(hend), inclusive)
             }
             #[allow(unreachable_patterns)]
             _ => HirExprKind::Lit(HirLit::Unit),
@@ -1219,3 +1239,5 @@ mod tests {
         assert_eq!(m.items.len(), 3);
     }
 }
+
+// P12-M2-APPLIED
