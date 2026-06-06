@@ -139,6 +139,10 @@ pub enum HirTy {
     String,                                      // heap-owned string (distinct from Str slice)
     Unit,
     Dyn(String),
+    /// P20-M1: seL4 sovereign IPC types — no heap, no libc
+    SeL4Endpoint,   // capability slot referencing an IPC endpoint
+    SeL4Badge,      // badge value carried on IPC (u64)
+    SeL4MsgInfo,    // seL4 MessageInfo word (label + length)
     Never,
     Ref(bool, Option<String>, Box<HirTy>),   // is_mut, lifetime, inner
     Ptr(bool, Box<HirTy>),
@@ -160,7 +164,8 @@ impl HirTy {
             HirTy::U8 | HirTy::U16 | HirTy::U32 | HirTy::U64 | HirTy::U128 | HirTy::Usize |
             HirTy::F32 | HirTy::F64 |
             HirTy::Unit | HirTy::Ref(false, _, _) |
-            HirTy::Infer | HirTy::Param(_)
+            HirTy::Infer | HirTy::Param(_) |
+            HirTy::SeL4Endpoint | HirTy::SeL4Badge | HirTy::SeL4MsgInfo
         )
     }
     pub fn is_ref(&self) -> bool { matches!(self, HirTy::Ref(_, _, _)) }
@@ -408,6 +413,7 @@ fn hir_ty_contains_string(ty: &HirTy) -> bool {
         }
         HirTy::Fn(ps, r) =>
             ps.iter().any(hir_ty_contains_string) || hir_ty_contains_string(r),
+        HirTy::SeL4Endpoint | HirTy::SeL4Badge | HirTy::SeL4MsgInfo => false,
         _ => false,
     }
 }
@@ -779,6 +785,10 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                     "char"  => HirTy::Char, "str"  => HirTy::Str,
                     "String" => HirTy::String,
                     "()"    => HirTy::Unit,
+                    // P20-M1: seL4 sovereign IPC types
+                    "sel4_endpoint" => HirTy::SeL4Endpoint,
+                    "sel4_badge"    => HirTy::SeL4Badge,
+                    "sel4_msginfo"  => HirTy::SeL4MsgInfo,
                     _       => HirTy::Named(ident.name.clone(), args),
                 }
             }
@@ -1331,6 +1341,50 @@ mod tests {
             assert!(matches!(&f.params[0].1, HirTy::I32),
                 "i32 param must stay HirTy::I32, got: {:?}", f.params[0].1);
         } else { panic!("expected fn"); }
+    }
+
+    // ── Phase 20 M1 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_sel4_endpoint_ty() {
+        // fn f(ep: sel4_endpoint) — param must lower to HirTy::SeL4Endpoint
+        let m = lower_src("fn f(ep: sel4_endpoint) -> i32 { return 0; }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(matches!(f.params[0].1, HirTy::SeL4Endpoint),
+                "param must be SeL4Endpoint, got: {:?}", f.params[0].1);
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_sel4_badge_ty() {
+        // fn f(b: sel4_badge) — param must lower to HirTy::SeL4Badge
+        let m = lower_src("fn f(b: sel4_badge) -> i32 { return 0; }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(matches!(f.params[0].1, HirTy::SeL4Badge),
+                "param must be SeL4Badge, got: {:?}", f.params[0].1);
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_sel4_msginfo_ty() {
+        // fn f(m: sel4_msginfo) — param must lower to HirTy::SeL4MsgInfo
+        let m = lower_src("fn f(msg: sel4_msginfo) -> i32 { return 0; }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(matches!(f.params[0].1, HirTy::SeL4MsgInfo),
+                "param must be SeL4MsgInfo, got: {:?}", f.params[0].1);
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_sel4_types_are_copy() {
+        // seL4 types must be Copy — they are u64 words, no heap
+        assert!(HirTy::SeL4Endpoint.is_copy(), "SeL4Endpoint must be Copy");
+        assert!(HirTy::SeL4Badge.is_copy(), "SeL4Badge must be Copy");
+        assert!(HirTy::SeL4MsgInfo.is_copy(), "SeL4MsgInfo must be Copy");
+        assert!(!HirTy::SeL4Endpoint.needs_drop(), "SeL4Endpoint must not need drop");
     }
 
     // ── Phase 19 M2 ──────────────────────────────────────────────────────────
