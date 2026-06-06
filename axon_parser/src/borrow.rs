@@ -103,6 +103,10 @@ pub struct BorrowChecker {
     in_unsafe_axon: bool,
 }
 
+impl Default for BorrowChecker {
+    fn default() -> Self { Self::new() }
+}
+
 impl BorrowChecker {
     pub fn new() -> Self {
         BorrowChecker {
@@ -293,6 +297,51 @@ mod tests {
         let items = parse(src).expect("parse failed");
         let module = lower(items);
         check(&module)
+    }
+
+    // ── Phase 18 M4 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_p18_integration() {
+        // Full program: clean fn has zero borrow errors.
+        // check() entry point works end-to-end on a HirModule.
+        let src = r#"
+            fn add(x: i32, y: i32) -> i32 { return x; }
+            fn sub(x: i32, y: i32) -> i32 { return y; }
+            fn mul(x: i32, y: i32) -> i32 { return x; }
+        "#;
+        let errs = check_src(src);
+        assert!(errs.is_empty(),
+            "clean module must have zero borrow errors, got: {:?}", errs);
+    }
+
+    #[test]
+    fn tc_p18_unsafe_axon_suppresses_all() {
+        // @unsafe_axon fn: injected violations are all suppressed
+        use crate::hir::{HirExpr, HirExprKind, HirTy, MoveState, MaybeAlias, PlaceId};
+        use crate::lexer::Span;
+
+        let place = PlaceId(55);
+        let mut checker = BorrowChecker::new();
+        checker.in_unsafe_axon = true;
+        checker.state.entry(place).or_default().move_state = Some(MoveState::Moved);
+
+        checker.check_expr(&HirExpr {
+            kind: HirExprKind::Place(place, MoveState::Owned),
+            ty: HirTy::I32,
+            span: Span::new(0, 1),
+            node_id: crate::hir::NodeId(0),
+            move_state: None,
+            alias: MaybeAlias::Unknown,
+        });
+
+        // enforce() must NOT exit — only fatal (non-suppressed) errors trigger exit
+        let fatal_count = checker.errors.iter().filter(|e| !e.suppressed).count();
+        assert_eq!(fatal_count, 0,
+            "unsafe_axon must suppress all violations, fatal count: {}", fatal_count);
+        // But the error is still logged
+        assert!(!checker.errors.is_empty(),
+            "violations must still be logged under unsafe_axon");
     }
 
     // ── Phase 18 M3 ──────────────────────────────────────────────────────────
