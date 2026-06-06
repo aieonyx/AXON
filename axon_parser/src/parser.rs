@@ -13,6 +13,7 @@ pub enum Ty {
     Array(Box<Ty>, Box<Expr>),
     Tuple(Vec<Ty>),
     Fn(Vec<Ty>, Option<Box<Ty>>),
+    Dyn(String),
     Never,
     Infer,
 }
@@ -334,6 +335,14 @@ impl Parser {
                 self.expect(&TokenKind::RParen)?;
                 let ret = if self.eat(&TokenKind::Arrow) { Some(Box::new(self.parse_ty()?)) } else { None };
                 Ok(Ty::Fn(params, ret))
+            }
+            TokenKind::Ident(ref s) if s == "dyn" => {
+                self.advance();
+                let trait_name = match self.peek().clone() {
+                    TokenKind::Ident(n) => { self.advance(); n }
+                    _ => return Err(ParseError { msg: "expected trait name after dyn".into(), span: self.current_span() }),
+                };
+                Ok(Ty::Dyn(trait_name))
             }
             _ => {
                 let span = self.current_span();

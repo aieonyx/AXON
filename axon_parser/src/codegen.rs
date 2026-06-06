@@ -31,6 +31,7 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::F64    => "double",
         HirTy::Char   => "i32",
         HirTy::Unit   => "void",
+        HirTy::Dyn(_)  => "ptr",
         HirTy::Never  => "void",
         HirTy::Str    => "ptr",
         HirTy::Slice(_) => "ptr",   // fat pointer alloca passed as ptr
@@ -1427,6 +1428,33 @@ fn main() -> i32 { return 0; }
         println!("MATCH IR:\n{}", ir);
         assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
         assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
+    // ── Phase 16 M2 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_dyn_trait_parses() {
+        // dyn Foo must parse and lower to HirTy::Dyn("Foo")
+        use crate::hir::{lower, HirItem, HirTy};
+        use crate::parser::parse;
+        let src = "fn takes_dyn(x: dyn Foo) -> i32 { return 0; }";
+        let items = parse(src).expect("parse failed");
+        let m = lower(items);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(
+                matches!(&f.params[0].1, HirTy::Dyn(n) if n == "Foo"),
+                "param must be HirTy::Dyn(Foo), got: {:?}", f.params[0].1
+            );
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_dyn_trait_emits_ptr() {
+        // dyn Foo parameter must emit as ptr in LLVM IR
+        let src = "fn takes_dyn(x: dyn Foo) -> i32 { return 0; }";
+        let ir = emit_src(src);
+        assert!(ir.contains("ptr"), "dyn Foo must emit as ptr in IR, got:\n{}", ir);
     }
 
     // ── Phase 16 M1 ──────────────────────────────────────────────────────────
