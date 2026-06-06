@@ -207,6 +207,8 @@ pub enum HirExprKind {
     Range(Box<HirExpr>, Box<HirExpr>, bool),
     Struct(String, Vec<(String, HirExpr)>),
     Path(Vec<String>),
+    // P14-M3: closure — params, body, captured places (copy-only, stack)
+    Closure(Vec<(PlaceId, HirTy)>, Box<HirExpr>, Vec<PlaceId>),
     // Drop elaboration — inserted by HIR lowerer
     Drop(PlaceId),
     // Borrow expiry — inserted at StorageDead
@@ -429,6 +431,46 @@ fn hir_expr_contains_string(expr: &HirExpr) -> bool {
 }
 
 #[allow(clippy::new_without_default)]
+/// P14-M3: walk a HirExpr and collect PlaceIds that are in outer_scope
+/// but not in the closure's own params
+fn collect_free_places(
+    expr: &HirExpr,
+    outer: &std::collections::HashSet<PlaceId>,
+    params: &[(PlaceId, HirTy)],
+) -> Vec<PlaceId> {
+    let param_set: std::collections::HashSet<PlaceId> = params.iter().map(|(p,_)| *p).collect();
+    let mut found = std::collections::HashSet::new();
+    collect_places_rec(expr, outer, &param_set, &mut found);
+    found.into_iter().collect()
+}
+
+fn collect_places_rec(
+    expr: &HirExpr,
+    outer: &std::collections::HashSet<PlaceId>,
+    params: &std::collections::HashSet<PlaceId>,
+    found: &mut std::collections::HashSet<PlaceId>,
+) {
+    match &expr.kind {
+        HirExprKind::Place(p, _) => {
+            if outer.contains(p) && !params.contains(p) { found.insert(*p); }
+        }
+        HirExprKind::BinOp(_, l, r) => {
+            collect_places_rec(l, outer, params, found);
+            collect_places_rec(r, outer, params, found);
+        }
+        HirExprKind::Block(stmts, tail) => {
+            for s in stmts {
+                if let HirStmtKind::Expr(e) | HirStmtKind::Let(_, _, _, Some(e)) = &s.kind {
+                    collect_places_rec(e, outer, params, found);
+                }
+            }
+            if let Some(t) = tail { collect_places_rec(t, outer, params, found); }
+        }
+        HirExprKind::Return(Some(e)) => collect_places_rec(e, outer, params, found),
+        _ => {}
+    }
+}
+
 impl HirLowerer {
     pub fn new() -> Self {
         HirLowerer {
@@ -870,6 +912,26 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                     });
                 HirExprKind::Range(Box::new(hstart), Box::new(hend), inclusive)
             }
+            Expr::Closure(params, body, _) => {
+                // P14-M3: lower closure — bind params, lower body, collect captures
+                self.push_scope();
+                let hparams: Vec<(PlaceId, HirTy)> = params.into_iter().map(|(pat, ty)| {
+                    let place = self.fresh_place();
+                    let hty = ty.map(|t| self.lower_ty(&t)).unwrap_or(HirTy::Infer);
+                    if let crate::parser::Pat::Ident(ident, _) = pat {
+                        self.bind_name(ident.name.clone(), place);
+                    }
+                    (place, hty)
+                }).collect();
+                // Snapshot name_env before body to detect captures
+                let outer_places: std::collections::HashSet<PlaceId> =
+                    self.name_env.iter().flat_map(|frame| frame.values().copied()).collect();
+                let hbody = self.lower_expr(*body);
+                self.pop_scope();
+                // Captures: places referenced in body that came from outer scope
+                let captures = collect_free_places(&hbody, &outer_places, &hparams);
+                HirExprKind::Closure(hparams, Box::new(hbody), captures)
+            }
             #[allow(unreachable_patterns)]
             _ => HirExprKind::Lit(HirLit::Unit),
         };
@@ -1027,6 +1089,7 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
             | Expr::Deref(_, s) | Expr::Range(_, _, _, s)
             | Expr::Path(_, s) => s.clone(),
             Expr::Ident(i) => i.span.clone(),
+            Expr::Closure(_, _, sp) => sp.clone(),
         }
     }
 }
