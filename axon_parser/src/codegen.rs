@@ -1449,6 +1449,35 @@ fn main() -> i32 { return 0; }
         assert!(ir.contains("phi i32"), "missing phi merge for match");
     }
 
+    // ── Phase 16 M4 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_p16_integration() {
+        // Full program: trait with impl + dyn param + ? operator in one module.
+        // 1. Vtable emitted for trait impl
+        // 2. dyn Trait param emits as ptr
+        // 3. ? operator emits conditional branch
+        let src = r#"
+            trait Compute { fn run(x: i32) -> i32 { return x; } }
+            struct Engine { x: i32, }
+            impl Compute for Engine { fn run(x: i32) -> i32 { return x; } }
+            fn process(e: dyn Compute, x: i32) -> i32 {
+                let result: i32 = x?;
+                return result;
+            }
+        "#;
+        let ir = emit_src(src);
+        // vtable present
+        assert!(ir.contains("@vtable_Compute_Engine"),
+            "IR must contain vtable, got:\n{}", ir);
+        // dyn param emits as ptr
+        assert!(ir.contains("ptr"),
+            "IR must contain ptr for dyn param, got:\n{}", ir);
+        // ? operator emits branch
+        assert!(ir.contains("br i1"),
+            "IR must contain conditional branch for ?, got:\n{}", ir);
+    }
+
     // ── Phase 16 M3 ──────────────────────────────────────────────────────────
 
     #[test]
