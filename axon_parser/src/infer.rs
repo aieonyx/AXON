@@ -570,6 +570,14 @@ impl ConstraintGen {
                         _          => self.fresh_var(),
                     };
                 }
+                // P12-M1: AxonIterator method resolution
+                if matches!(&recv_ty, InfTy::Named(n, _) if n == "AxonIterator") {
+                    return match method.as_str() {
+                        // next() -> Option<T>  (fresh var for item type)
+                        "next" => InfTy::Named("Option".into(), vec![self.fresh_var()]),
+                        _      => self.fresh_var(),
+                    };
+                }
                 // P11-M2: slice method return types
                 if matches!(recv_ty, InfTy::Slice(_)) {
                     return match method.as_str() {
@@ -892,3 +900,5 @@ mod tests {
         assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
     }
 }
+
+// P12-M1-APPLIED
