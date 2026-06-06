@@ -20,6 +20,14 @@ use std::collections::HashMap;
 
 /// Merge two HirModules into one — items concatenated, use_maps unioned,
 /// errors concatenated. Later modules win on use_map key conflicts.
+/// Merge two HIR modules.
+/// use_map key conflicts are resolved by last-writer-wins (b overrides a).
+/// This is intentional for incremental compilation; conflict errors
+/// are deferred to a later analysis phase.
+///
+/// NOTE: PlaceIds from separate lower() calls are NOT remapped here.
+/// For correct multi-file codegen, use compile_sources() which merges
+/// source text before lowering, giving a single shared PlaceId space.
 pub fn merge_modules(mut a: HirModule, b: HirModule) -> HirModule {
     a.items.extend(b.items);
     a.errors.extend(b.errors);
@@ -43,24 +51,40 @@ pub fn empty_module() -> HirModule {
 // ============================================================
 
 /// Parse and lower multiple source strings into a single HirModule.
-/// Sources are merged in order — later sources take precedence on conflicts.
+/// Sources are concatenated before lowering to guarantee a single shared
+/// PlaceId space — this prevents PlaceId collisions in merged IR.
+/// Parse errors in any source are collected; successfully parsed sources
+/// are still included.
 pub fn compile_sources(sources: &[&str]) -> HirModule {
-    let mut result = empty_module();
+    // Collect parse errors separately, lower valid sources together
+    let mut errors: Vec<HirError> = Vec::new();
+    let mut all_items = Vec::new();
+    let mut all_use_paths: Vec<Vec<String>> = Vec::new();
+
     for src in sources {
         match parse(src) {
             Ok(items) => {
-                let module = crate::hir::lower(items);
-                result = merge_modules(result, module);
+                // Collect use paths before consuming items
+                for item in &items {
+                    if let crate::parser::Item::Use(path, _) = item {
+                        all_use_paths.push(path.clone());
+                    }
+                }
+                all_items.extend(items);
             }
             Err(e) => {
-                result.errors.push(HirError {
+                errors.push(HirError {
                     msg: format!("parse error: {}", e.msg),
                     span: e.span,
                 });
             }
         }
     }
-    result
+
+    // Lower all items together — single HirLowerer, no PlaceId collision
+    let mut module = crate::hir::lower(all_items);
+    module.errors.extend(errors);
+    module
 }
 
 /// Parse and lower source files by reading from disk.
@@ -181,6 +205,25 @@ mod tests {
         let m = compile_sources(&[src]);
         let merged = merge_modules(empty_module(), compile_sources(&[src]));
         assert_eq!(merged.items.len(), m.items.len());
+    }
+
+    #[test]
+    fn tc_p19_driver_compile_files() {
+        // compile_files reads from disk — write temp files and verify merge
+        use crate::hir::HirItem;
+        let dir = "/tmp/axon_p19_test";
+        let _ = std::fs::create_dir(dir);
+        let f1 = format!("{}/a.axon", dir);
+        let f2 = format!("{}/b.axon", dir);
+        std::fs::write(&f1, "fn fa(x: i32) -> i32 { return x; }").unwrap();
+        std::fs::write(&f2, "fn fb(x: i32) -> i32 { return x; }").unwrap();
+        let module = compile_files(&[f1.as_str(), f2.as_str()]);
+        assert!(module.errors.is_empty(), "errors: {:?}", module.errors);
+        let names: Vec<String> = module.items.iter().filter_map(|i| {
+            if let HirItem::Fn(f) = i { Some(f.name.clone()) } else { None }
+        }).collect();
+        assert!(names.contains(&"fa".to_string()), "must contain fa, got: {:?}", names);
+        assert!(names.contains(&"fb".to_string()), "must contain fb, got: {:?}", names);
     }
 
     #[test]
