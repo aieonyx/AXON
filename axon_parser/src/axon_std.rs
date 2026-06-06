@@ -327,6 +327,12 @@ declare ptr @axon_iter_next(ptr)\n\
 ; P12-M2: range protocol\n\
 declare ptr @axon_range_new(i64, i64)\n\
 declare ptr @axon_range_next(ptr)\n\
+; P12-M3: iterator adapters\n\
+declare ptr @axon_iter_map(ptr, ptr)\n\
+declare ptr @axon_iter_filter(ptr, ptr)\n\
+declare i64 @axon_iter_fold(ptr, i64, ptr)\n\
+declare ptr @axon_iter_enumerate(ptr)\n\
+declare ptr @axon_iter_collect(ptr)\n\
 ; === end stdlib ===\n"
 }
 
@@ -524,3 +530,5 @@ mod tests {
 // P12-M1-APPLIED
 
 // P12-M2-APPLIED
+
+// P12-M3-APPLIED
