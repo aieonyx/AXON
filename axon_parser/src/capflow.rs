@@ -144,6 +144,7 @@ fn collect_callees_from_expr(expr: &Expr, out: &mut Vec<String>) {
         }
         Expr::Lit(_, _) | Expr::Ident(_) | Expr::Path(_, _)
         | Expr::Continue(_) | Expr::Return(None, _) | Expr::Break(None, _) => {}
+        Expr::Closure(_, body, _) => collect_callees_from_expr(body, out),
     }
 }
 

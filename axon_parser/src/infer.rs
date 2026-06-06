@@ -719,6 +719,7 @@ impl ConstraintGen {
             }
             HirExprKind::Path(_) => self.fresh_var(),
             HirExprKind::Drop(_) | HirExprKind::BorrowExpires(_) => InfTy::Unit,
+            HirExprKind::Closure(_, _, _) => InfTy::Unit, // P14-M3: closure type inference deferred
         }
     }
 

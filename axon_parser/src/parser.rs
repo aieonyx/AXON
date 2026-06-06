@@ -60,6 +60,8 @@ pub enum Expr {
     Deref(Box<Expr>, Span),
     Range(Option<Box<Expr>>, Option<Box<Expr>>, bool, Span),
     Path(Vec<Ident>, Span),
+    /// P14-M3: closure |params| body
+    Closure(Vec<(Pat, Option<Box<Ty>>)>, Box<Expr>, Span),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -936,6 +938,24 @@ impl Parser {
                     return Ok(Expr::Path(path, s));
                 }
                 Ok(Expr::Ident(ident))
+            }
+            TokenKind::Pipe => {
+                // P14-M3: closure syntax  |x, y| body
+                self.advance(); // consume leading |
+                let mut params: Vec<(Pat, Option<Box<Ty>>)> = Vec::new();
+                while !matches!(self.peek(), TokenKind::Pipe | TokenKind::Eof) {
+                    let pat = self.parse_pat()?;
+                    let ty = if self.eat(&TokenKind::Colon) {
+                        Some(Box::new(self.parse_ty()?))
+                    } else {
+                        None
+                    };
+                    params.push((pat, ty));
+                    if !self.eat(&TokenKind::Comma) { break; }
+                }
+                self.expect(&TokenKind::Pipe)?; // consume closing |
+                let body = self.parse_expr()?;
+                Ok(Expr::Closure(params, Box::new(body), s))
             }
             other => Err(ParseError::new(format!("expected expression, got {:?}", other), s))
         }
