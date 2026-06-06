@@ -285,12 +285,11 @@ pub fn infer_ffi_caps(fn_name: &str) -> Vec<String> {
     }
 
     // seL4 IPC intrinsics — axon_ipc_* require ipc_send or ipc_receive
-    let ipc_send_patterns = ["axon_ipc_call", "axon_ipc_send"];
-    if ipc_send_patterns.iter().any(|p| name == *p) {
+    // Prefix match: catches axon_ipc_call, axon_ipc_send, axon_ipc_call_async etc.
+    if name.starts_with("axon_ipc_call") || name.starts_with("axon_ipc_send") {
         caps.push("ipc_send".to_string());
     }
-    let ipc_recv_patterns = ["axon_ipc_recv"];
-    if ipc_recv_patterns.iter().any(|p| name == *p) {
+    if name.starts_with("axon_ipc_recv") {
         caps.push("ipc_receive".to_string());
     }
 
