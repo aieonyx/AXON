@@ -242,6 +242,19 @@ impl LlvmEmitter {
                 }
             }
             HirItem::Trait(_) => {}
+            HirItem::ExternFn(name, _abi, params, ret, _caps, _) => {
+                // P21-M3: emit LLVM declare for foreign function
+                let param_tys: Vec<String> = params.iter()
+                    .enumerate()
+                    .map(|(i, ty)| format!("{} %arg{}", emit_llvm_ty(ty), i))
+                    .collect();
+                let ret_ty = emit_llvm_ty(ret);
+                self.emit_line(&format!(
+                    "declare {} @{}({})",
+                    ret_ty, name, param_tys.join(", ")
+                ));
+                self.emit_blank();
+            }
             _ => {}
         }
     }
@@ -1492,6 +1505,37 @@ fn main() -> i32 { return 0; }
         println!("MATCH IR:\n{}", ir);
         assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
         assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
+    // ── Phase 21 M3 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_extern_fn_declare_emitted() {
+        // extern "C" { fn connect(fd: i32) -> i32; } must emit declare in IR
+        let src = r#"extern "C" { fn connect(fd: i32) -> i32; }"#;
+        let ir = emit_src(src);
+        assert!(ir.contains("declare i32 @connect"),
+            "IR must contain declare for connect, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_extern_fn_declare_void_ret() {
+        // extern "C" { fn free(ptr: i64); } — void return
+        let src = r#"extern "C" { fn free(ptr: i64); }"#;
+        let ir = emit_src(src);
+        assert!(ir.contains("declare void @free"),
+            "IR must contain declare void @free, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_extern_fn_cstr_declare() {
+        // extern "C" { fn puts(s: CStr) -> i32; } — CStr emits as ptr
+        let src = r#"extern "C" { fn puts(s: CStr) -> i32; }"#;
+        let ir = emit_src(src);
+        assert!(ir.contains("declare i32 @puts"),
+            "IR must contain declare i32 @puts, got:\n{}", ir);
+        assert!(ir.contains("ptr %arg0"),
+            "CStr param must emit as ptr, got:\n{}", ir);
     }
 
     // ── Phase 20 M4 ──────────────────────────────────────────────────────────
