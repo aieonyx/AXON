@@ -359,6 +359,8 @@ pub enum HirItem {
     TypeAlias(String, HirTy, Span),
     /// P19-M1: mod block — name + lowered items
     Module(String, Vec<HirItem>),
+    /// P21-M1: foreign function declaration
+    ExternFn(String, String, Vec<HirTy>, HirTy, Vec<String>, Span), // name, abi, params, ret, caps, span
 }
 
 // ============================================================
@@ -634,6 +636,29 @@ impl HirLowerer {
                 Some(HirItem::TypeAlias(name.name, self.lower_ty(&ty), span))
             }
             Item::Use(_, _) | Item::Profile(_) => None,
+            Item::Extern(abi, fns, span) => {
+                // P21-M1: lower extern block — each fn becomes HirItem::ExternFn
+                let mut items = Vec::new();
+                for sig in fns {
+                    let params: Vec<HirTy> = sig.params.iter()
+                        .map(|(_, ty)| self.lower_ty(ty))
+                        .collect();
+                    let ret = sig.ret.as_ref()
+                        .map(|t| self.lower_ty(t))
+                        .unwrap_or(HirTy::Unit);
+                    // Auto-infer caps from function name
+                    let caps = crate::capflow::infer_ffi_caps(&sig.name);
+                    items.push(HirItem::ExternFn(
+                        sig.name, abi.clone(), params, ret, caps, span.clone()
+                    ));
+                }
+                // Return first item directly if single, else wrap in module
+                if items.len() == 1 {
+                    items.into_iter().next()
+                } else {
+                    Some(HirItem::Module(format!("extern_{}", abi), items))
+                }
+            }
             Item::Mod(name, items, _) => {
                 // P19-M1: lower mod block — recursively lower inner items
                 let hir_items: Vec<HirItem> = items.into_iter()
@@ -1341,6 +1366,58 @@ mod tests {
             assert!(matches!(&f.params[0].1, HirTy::I32),
                 "i32 param must stay HirTy::I32, got: {:?}", f.params[0].1);
         } else { panic!("expected fn"); }
+    }
+
+    // ── Phase 21 M1 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_extern_block_parses() {
+        // extern "C" { fn connect(fd: i32) -> i32; } must parse without errors
+        use crate::parser::parse;
+        let src = r#"extern "C" { fn connect(fd: i32) -> i32; }"#;
+        let items = parse(src).expect("parse failed");
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0], crate::parser::Item::Extern(_, _, _)),
+            "must parse as Item::Extern, got: {:?}", items[0]);
+    }
+
+    #[test]
+    fn tc_extern_block_lowers_to_extern_fn() {
+        // extern "C" { fn connect(fd: i32) -> i32; } lowers to HirItem::ExternFn
+        let m = lower_src(r#"extern "C" { fn connect(fd: i32) -> i32; }"#);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        assert_eq!(m.items.len(), 1);
+        if let HirItem::ExternFn(name, abi, params, ret, _caps, _) = &m.items[0] {
+            assert_eq!(name, "connect");
+            assert_eq!(abi, "C");
+            assert_eq!(params.len(), 1);
+            assert_eq!(*ret, HirTy::I32);
+        } else {
+            panic!("expected HirItem::ExternFn, got: {:?}", m.items[0]);
+        }
+    }
+
+    #[test]
+    fn tc_extern_fn_caps_inferred() {
+        // extern "C" { fn connect(...) } must auto-infer network_connect cap
+        let m = lower_src(r#"extern "C" { fn connect(fd: i32) -> i32; }"#);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::ExternFn(_, _, _, _, caps, _) = &m.items[0] {
+            assert!(caps.contains(&"network_connect".to_string()),
+                "connect must infer network_connect cap, got: {:?}", caps);
+        } else { panic!("expected ExternFn"); }
+    }
+
+    #[test]
+    fn tc_extern_block_multi_fn() {
+        // extern block with multiple fns produces Module wrapping ExternFns
+        let m = lower_src(r#"extern "C" { fn open(path: i32) -> i32; fn write(fd: i32) -> i32; }"#);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        assert_eq!(m.items.len(), 1);
+        if let HirItem::Module(name, items) = &m.items[0] {
+            assert!(name.starts_with("extern_"), "module name must start with extern_");
+            assert_eq!(items.len(), 2, "must contain 2 extern fns");
+        } else { panic!("expected Module wrapping ExternFns"); }
     }
 
     // ── Phase 20 M1 ──────────────────────────────────────────────────────────

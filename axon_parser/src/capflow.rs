@@ -42,6 +42,13 @@ impl CallGraph {
                         }
                     }
                 }
+                Item::Extern(_, fns, _) => {
+                // P21-M1: register extern fn names with inferred caps
+                for sig in fns {
+                    let caps = infer_ffi_caps(&sig.name);
+                    cg.declared_caps.entry(sig.name.clone()).or_default().extend(caps);
+                }
+            }
                 _ => {}
             }
         }
