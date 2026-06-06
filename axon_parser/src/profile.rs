@@ -761,6 +761,44 @@ mod tests {
         );
     }
 
+    // ── Phase 15 M4 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_p15_integration() {
+        // Full program: network cap flows through two-hop chain.
+        // do_network declares #[cap(network_connect)].
+        // mid calls do_network but does NOT declare the cap.
+        // top calls mid but does NOT declare the cap.
+        // Under seL4-strict: both mid and top must be flagged.
+        let src = r#"
+            #[cap(network_connect)]
+            fn do_network(x: i32) -> i32 { return x; }
+            fn mid(x: i32) -> i32 { return do_network(x); }
+            fn top(x: i32) -> i32 { return mid(x); }
+        "#;
+        let vs = check_trans_src(src, Profile::SeL4Strict);
+        assert!(
+            vs.iter().any(|v| v.caller == "mid" && v.capability == "network_connect"),
+            "mid must be flagged for undeclared network_connect, got: {:?}",
+            vs.iter().map(|v| (&v.caller, &v.capability)).collect::<Vec<_>>()
+        );
+        assert!(
+            vs.iter().any(|v| v.caller == "top" && v.capability == "network_connect"),
+            "top must be flagged for undeclared network_connect, got: {:?}",
+            vs.iter().map(|v| (&v.caller, &v.capability)).collect::<Vec<_>>()
+        );
+        // Clean fn with no cap chain must not be flagged
+        let src2 = r#"
+            fn add(x: i32, y: i32) -> i32 { return x; }
+            fn double(x: i32) -> i32 { return add(x, x); }
+        "#;
+        let vs2 = check_trans_src(src2, Profile::SeL4Strict);
+        assert!(vs2.is_empty(),
+            "clean chain must have zero violations, got: {:?}",
+            vs2.iter().map(|v| (&v.caller, &v.capability)).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn te16_transitive_violation_detected() {
         // f calls g; g has network_connect; seL4-strict forbids it

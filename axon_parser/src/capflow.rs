@@ -277,10 +277,10 @@ pub fn infer_ffi_caps(fn_name: &str) -> Vec<String> {
         "stat", "fstat", "lstat", "readdir", "opendir",
         "access", "realpath", "getcwd",
     ];
-    if file_read_patterns.iter().any(|p| name == *p || name.starts_with(p)) {
-        if !caps.contains(&"file_read".to_string()) {
-            caps.push("file_read".to_string());
-        }
+    if file_read_patterns.iter().any(|p| name == *p || name.starts_with(p))
+        && !caps.contains(&"file_read".to_string())
+    {
+        caps.push("file_read".to_string());
     }
 
     // Process spawn: fork/exec family
