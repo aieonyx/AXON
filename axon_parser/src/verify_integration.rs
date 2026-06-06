@@ -12,7 +12,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::hir::{lower, HirItem, HirTy};
+    use crate::hir::{lower, HirItem};
     use crate::parser::parse;
     use axon_verify_core::{
         check_ensures, check_dwc, VerifyOutcome,
