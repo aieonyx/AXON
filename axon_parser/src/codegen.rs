@@ -1302,6 +1302,36 @@ mod tests {
     #[test]
     #[test]
     #[test]
+    #[test]
+    fn tc_p14_integration() {
+        // Program using struct + match + closure together
+        let src = r#"
+struct Point { x: i32, y: i32 }
+fn classify(n: i32) -> i32 {
+    match n {
+        0 => 10,
+        1 => 20,
+        _ => 99,
+    }
+}
+fn main() -> i32 {
+    let p = Point { x: 3, y: 4 };
+    let a = p.x;
+    let offset: i32 = 5;
+    let _add = |v: i32| v + offset;
+    let r = classify(a);
+    return r;
+}
+"#;
+        let ir = emit_src(src);
+        println!("INTEGRATION IR:\n{}", ir);
+        assert!(ir.contains("%struct.Point = type { i32, i32 }"), "missing struct type");
+        assert!(ir.contains("getelementptr inbounds %struct.Point"), "missing field GEP");
+        assert!(ir.contains("icmp eq i32"), "missing match icmp");
+        assert!(ir.contains("phi i32"), "missing match phi");
+        assert!(ir.contains("alloca"), "missing closure env alloca");
+    }
+
     fn tc_closure_capture() {
         // let offset = 7; let add = |x| x + offset; add(3) => env struct allocated
         let src = r#"
