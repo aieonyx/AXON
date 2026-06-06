@@ -3,6 +3,7 @@
 // Copyright © 2026 Edison Lepiten — AIEONYX
 // Target: x86_64-pc-linux-gnu, LLVM 18
 
+use crate::mono::{MonoTable};
 use crate::hir::{
     HirModule, HirItem, HirFn, HirExpr, HirExprKind,
     HirStmt, HirStmtKind, HirLit, HirTy,
@@ -154,6 +155,19 @@ impl LlvmEmitter {
             self.output.push('\n');
         }
         self.output.clone()
+    }
+
+    /// P17-M3: Emit concrete monomorphized functions from a MonoTable.
+    /// Caller provides (fn_name, type_args) pairs to instantiate.
+    pub fn emit_mono(&mut self, table: &MonoTable, instantiations: &[(&str, Vec<(&str, crate::hir::HirTy)>)]) {
+        for (fn_name, type_args) in instantiations {
+            let args: Vec<(&str, crate::hir::HirTy)> = type_args.iter()
+                .map(|(k, v)| (*k, v.clone()))
+                .collect();
+            if let Some(concrete_fn) = table.instantiate(fn_name, &args) {
+                self.emit_fn(&concrete_fn);
+            }
+        }
     }
 
     fn emit_item(&mut self, item: &HirItem) {
@@ -1448,6 +1462,42 @@ fn main() -> i32 { return 0; }
         println!("MATCH IR:\n{}", ir);
         assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
         assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
+    // ── Phase 17 M3 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_mono_emit_i32() {
+        use crate::mono::MonoTable;
+        use crate::hir::{lower, HirTy};
+        use crate::parser::parse;
+        let src = "fn id<T>(x: T) -> T { return x; }";
+        let items = parse(src).expect("parse failed");
+        let module = lower(items);
+        let table = MonoTable::collect(&module);
+        let mut emitter = LlvmEmitter::new();
+        emitter.emit_mono(&table, &[("id", vec![("T", HirTy::I32)])]);
+        let ir = emitter.output.clone();
+        assert!(ir.contains("@id_i32"), "IR must contain @id_i32, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_mono_emit_two_instances() {
+        use crate::mono::MonoTable;
+        use crate::hir::{lower, HirTy};
+        use crate::parser::parse;
+        let src = "fn id<T>(x: T) -> T { return x; }";
+        let items = parse(src).expect("parse failed");
+        let module = lower(items);
+        let table = MonoTable::collect(&module);
+        let mut emitter = LlvmEmitter::new();
+        emitter.emit_mono(&table, &[
+            ("id", vec![("T", HirTy::I32)]),
+            ("id", vec![("T", HirTy::Bool)]),
+        ]);
+        let ir = emitter.output.clone();
+        assert!(ir.contains("@id_i32"), "IR must contain @id_i32, got:\n{}", ir);
+        assert!(ir.contains("@id_bool"), "IR must contain @id_bool, got:\n{}", ir);
     }
 
     // ── Phase 16 M4 ──────────────────────────────────────────────────────────
