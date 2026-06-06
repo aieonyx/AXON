@@ -1409,9 +1409,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
-    #[test]
-    #[test]
     fn tc_p14_integration() {
         // Program using struct + match + closure together
         let src = r#"

@@ -284,6 +284,16 @@ pub fn infer_ffi_caps(fn_name: &str) -> Vec<String> {
         caps.push("file_read".to_string());
     }
 
+    // seL4 IPC intrinsics — axon_ipc_* require ipc_send or ipc_receive
+    let ipc_send_patterns = ["axon_ipc_call", "axon_ipc_send"];
+    if ipc_send_patterns.iter().any(|p| name == *p) {
+        caps.push("ipc_send".to_string());
+    }
+    let ipc_recv_patterns = ["axon_ipc_recv"];
+    if ipc_recv_patterns.iter().any(|p| name == *p) {
+        caps.push("ipc_receive".to_string());
+    }
+
     // Process spawn: fork/exec family
     let spawn_patterns = [
         "fork", "exec", "execve", "execvp", "execle",
@@ -405,6 +415,50 @@ mod tests {
         let chain = info.cap_chains.get("network_connect").expect("chain must be recorded");
         assert!(chain.contains(&"wrapper".to_string()));
         assert!(chain.contains(&"send".to_string()));
+    }
+
+    // ── Phase 20 M3 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_ipc_ffi_infers_ipc_send() {
+        // axon_ipc_call must infer ipc_send cap
+        let caps = super::infer_ffi_caps("axon_ipc_call");
+        assert!(caps.contains(&"ipc_send".to_string()),
+            "axon_ipc_call must infer ipc_send, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_ipc_ffi_send_infers_ipc_send() {
+        let caps = super::infer_ffi_caps("axon_ipc_send");
+        assert!(caps.contains(&"ipc_send".to_string()),
+            "axon_ipc_send must infer ipc_send, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_ipc_ffi_recv_infers_ipc_receive() {
+        let caps = super::infer_ffi_caps("axon_ipc_recv");
+        assert!(caps.contains(&"ipc_receive".to_string()),
+            "axon_ipc_recv must infer ipc_receive, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_ipc_cap_transitive_propagates() {
+        // fn caller calls fn with #[cap(ipc_send)] — ipc_send propagates transitively.
+        // All profiles allow ipc_send so no violation; but the cap must propagate
+        // in the call graph (transitive_caps of caller must include ipc_send).
+        let src = r#"
+            #[cap(ipc_send)]
+            fn ipc_fn(x: i32) -> i32 { return x; }
+            fn caller(x: i32) -> i32 { return ipc_fn(x); }
+        "#;
+        let items = crate::parser::parse(src).expect("parse failed");
+        let cg = super::CallGraph::build_from_items(&items);
+        let trans = super::propagate(&cg);
+        let caller_caps = &trans.get("caller").expect("caller must exist").transitive_caps;
+        assert!(
+            caller_caps.contains("ipc_send"),
+            "ipc_send must propagate to caller, got: {:?}", caller_caps
+        );
     }
 
     // ── Phase 15 M3 ──────────────────────────────────────────────────────────

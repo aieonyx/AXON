@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn tc_use_after_move() {
         // Directly inject a Moved place into checker state and verify detection.
-        use crate::hir::{HirExpr, HirExprKind, HirTy, HirLit, MoveState};
+        use crate::hir::{HirExpr, HirExprKind, HirTy, MoveState};
         use crate::hir::MaybeAlias;
         use crate::lexer::Span;
         use crate::hir::PlaceId;
