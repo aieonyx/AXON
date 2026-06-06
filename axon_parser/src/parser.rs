@@ -63,6 +63,8 @@ pub enum Expr {
     Path(Vec<Ident>, Span),
     /// P14-M3: closure |params| body
     Closure(Vec<(Pat, Option<Box<Ty>>)>, Box<Expr>, Span),
+    /// P16-M3: ? operator
+    Try(Box<Expr>, Span),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -875,6 +877,7 @@ impl Parser {
                 }
                 TokenKind::LParen   => { self.advance(); let args = self.parse_call_args()?; expr = Expr::Call(Box::new(expr), args, s); }
                 TokenKind::LBracket => { self.advance(); let idx = self.parse_expr()?; self.expect(&TokenKind::RBracket)?; expr = Expr::Index(Box::new(expr), Box::new(idx), s); }
+                TokenKind::Quest => { self.advance(); expr = Expr::Try(Box::new(expr), s); }
                 _ => break,
             }
         }

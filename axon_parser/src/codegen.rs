@@ -303,6 +303,25 @@ impl LlvmEmitter {
                 self.emit_line(&format!("  {} = sub {} 0, {}", tmp, ty, iv));
                 Some(tmp)
             }
+            HirExprKind::Try(inner) => {
+                // P16-M3: expr? — evaluate inner; emit conditional early-return on Err
+                // Until Result ABI lands (P21), tag check is a no-op identity.
+                let inner_val = self.emit_expr(inner)?;
+                let n = self.ssa.tmp_counter; self.ssa.tmp_counter += 4;
+                let tag     = format!("%try_tag_{}", n);
+                let err_lbl = format!("try_err_{}", n);
+                let ok_lbl  = format!("try_ok_{}", n);
+                let cont_lbl = format!("try_cont_{}", n);
+                self.emit_line(&format!("  {} = and i32 {}, 0", tag, inner_val));
+                self.emit_line(&format!("  %try_cond_{} = icmp ne i32 {}, 0", n, tag));
+                self.emit_line(&format!("  br i1 %try_cond_{}, label %{}, label %{}", n, err_lbl, ok_lbl));
+                self.emit_line(&format!("{}:", err_lbl));
+                self.emit_line(&format!("  ret i32 {}", inner_val));
+                self.emit_line(&format!("{}:", ok_lbl));
+                self.emit_line(&format!("  br label %{}", cont_lbl));
+                self.emit_line(&format!("{}:", cont_lbl));
+                Some(inner_val)
+            }
             HirExprKind::Return(val) => {
                 if let Some(v) = val {
                     if let Some(rv) = self.emit_expr(v) {
@@ -1428,6 +1447,37 @@ fn main() -> i32 { return 0; }
         println!("MATCH IR:\n{}", ir);
         assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
         assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
+    // ── Phase 16 M3 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_try_operator_parses() {
+        // expr? must parse and lower to HirExprKind::Try
+        use crate::hir::{lower, HirItem, HirExprKind, HirStmtKind};
+        use crate::parser::parse;
+        let src = "fn f(x: i32) -> i32 { let y: i32 = x?; return y; }";
+        let items = parse(src).expect("parse failed");
+        let m = lower(items);
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            if let HirExprKind::Block(stmts, _) = &f.body.kind {
+                if let HirStmtKind::Let(_, _, _, Some(init)) = &stmts[0].kind {
+                    assert!(matches!(init.kind, HirExprKind::Try(_)),
+                        "x? must lower to HirExprKind::Try, got: {:?}", init.kind);
+                } else { panic!("expected let with init"); }
+            } else { panic!("expected block"); }
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_try_operator_emits_branch() {
+        // ? operator must emit a conditional branch in IR
+        let src = "fn f(x: i32) -> i32 { let y: i32 = x?; return y; }";
+        let ir = emit_src(src);
+        assert!(ir.contains("br i1"), "? must emit conditional branch, got:\n{}", ir);
+        assert!(ir.contains("try_err"), "? must emit error path label, got:\n{}", ir);
+        assert!(ir.contains("try_ok"), "? must emit ok path label, got:\n{}", ir);
     }
 
     // ── Phase 16 M2 ──────────────────────────────────────────────────────────
