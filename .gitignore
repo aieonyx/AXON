@@ -11,3 +11,4 @@ nohup.out
 *.log
 .aider*
 patch_p*.py
+patch_p*.py
