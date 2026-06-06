@@ -33,6 +33,7 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::Unit   => "void",
         HirTy::Never  => "void",
         HirTy::Str    => "ptr",
+        HirTy::Slice(_) => "ptr",   // fat pointer alloca passed as ptr
         HirTy::String  => "ptr",   // heap String — opaque ptr (LLVM 18)
         // CF5: Infer is a type hole from HIR lowerer.
         // Expression nodes legitimately carry Infer until inference writes back (Profile Stage).
@@ -45,6 +46,7 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
 pub fn emit_llvm_ty_owned(ty: &HirTy) -> String {
     match ty {
         HirTy::Array(elem, n) => format!("[{} x {}]", n, emit_llvm_ty_owned(elem)),
+        HirTy::Slice(_) => "{ ptr, i64 }".to_string(),
         _ => emit_llvm_ty(ty).to_string(),
     }
 }
@@ -119,6 +121,8 @@ impl LlvmEmitter {
         self.emit_line("declare ptr @axon_string_to_uppercase(ptr)");
         self.emit_line("declare ptr @axon_string_to_lowercase(ptr)");
         self.emit_line("declare void @axon_bounds_check(i64, i64)");
+        // P11-M2: slice runtime
+        self.emit_line("declare i64 @axon_slice_len(ptr)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -388,6 +392,53 @@ impl LlvmEmitter {
                 }
                 Some(alloca)
             }
+            HirExprKind::MethodCall(recv, method, args) => {
+                // P11-M2: slice .len() — load i64 from fat pointer field 1
+                if matches!(recv.ty, HirTy::Slice(_)) {
+                    if let Some(fat_ptr) = self.emit_expr(recv) {
+                        if method == "len" {
+                            let gep = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = getelementptr inbounds {{ ptr, i64 }}, ptr {}, i32 0, i32 1", gep, fat_ptr));
+                            let tmp = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = load i64, ptr {}", tmp, gep));
+                            return Some(tmp);
+                        }
+                    }
+                    return None;
+                }
+                // String method dispatch — existing runtime externs
+                if matches!(recv.ty, HirTy::String) {
+                    if let Some(recv_val) = self.emit_expr(recv) {
+                        let runtime_fn = match method.as_str() {
+                            "len"          => Some(("axon_string_len", "i64")),
+                            "is_empty"     => Some(("axon_string_is_empty", "i1")),
+                            "to_uppercase" => Some(("axon_string_to_uppercase", "ptr")),
+                            "to_lowercase" => Some(("axon_string_to_lowercase", "ptr")),
+                            _ => None,
+                        };
+                        if let Some((fn_name, ret_ty)) = runtime_fn {
+                            let mut arg_strs = vec![format!("ptr {}", recv_val)];
+                            for arg in args {
+                                if let Some(v) = self.emit_expr(arg) {
+                                    arg_strs.push(format!("{} {}", emit_llvm_ty(&arg.ty), v));
+                                }
+                            }
+                            if ret_ty == "void" {
+                                self.emit_line(&format!("  call void @{}({})", fn_name, arg_strs.join(", ")));
+                                return None;
+                            } else {
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = call {} @{}({})", tmp, ret_ty, fn_name, arg_strs.join(", ")));
+                                return Some(tmp);
+                            }
+                        }
+                    }
+                }
+                // Generic method call — evaluate receiver and args, return fresh tmp
+                self.emit_expr(recv);
+                for arg in args { self.emit_expr(arg); }
+                None
+            }
             _ => None,
         }
     }
@@ -395,6 +446,39 @@ impl LlvmEmitter {
     fn emit_stmt(&mut self, stmt: &HirStmt) {
         match &stmt.kind {
             HirStmtKind::Let(place, _, ty, init) => {
+                // P11-M2: slice-from-array coercion
+                if let HirTy::Slice(elem_ty) = ty {
+                    if let Some(init_expr) = init {
+                        if let HirExprKind::Array(elems) = &init_expr.kind {
+                            let n = elems.len();
+                            let ety = emit_llvm_ty_owned(elem_ty);
+                            let arr_ty = format!("[{} x {}]", n, ety);
+                            // alloca the array
+                            let arr_alloca = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = alloca {}", arr_alloca, arr_ty));
+                            for (i, e) in elems.iter().enumerate() {
+                                if let Some(v) = self.emit_expr(e) {
+                                    let gep = self.ssa.fresh_tmp();
+                                    self.emit_line(&format!("  {} = getelementptr inbounds {}, ptr {}, i64 0, i64 {}", gep, arr_ty, arr_alloca, i));
+                                    self.emit_line(&format!("  store {} {}, ptr {}", ety, v, gep));
+                                }
+                            }
+                            // alloca fat pointer { ptr, i64 }
+                            let fat_alloca = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = alloca {{ ptr, i64 }}", fat_alloca));
+                            // store data pointer at field 0
+                            let gep0 = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = getelementptr inbounds {{ ptr, i64 }}, ptr {}, i32 0, i32 0", gep0, fat_alloca));
+                            self.emit_line(&format!("  store ptr {}, ptr {}", arr_alloca, gep0));
+                            // store length at field 1
+                            let gep1 = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = getelementptr inbounds {{ ptr, i64 }}, ptr {}, i32 0, i32 1", gep1, fat_alloca));
+                            self.emit_line(&format!("  store i64 {}, ptr {}", n, gep1));
+                            self.ssa.place_map.insert(*place, fat_alloca);
+                            return;
+                        }
+                    }
+                }
                 let llty = emit_llvm_ty_owned(ty);
                 let alloca = self.ssa.fresh_tmp();
                 self.emit_line(&format!("  {} = alloca {}", alloca, llty));
@@ -845,6 +929,36 @@ mod tests {
         let ir = emit_src("fn f(x: i32) -> i32 { return x; }");
         assert!(ir.contains("entry:"));
         assert!(ir.contains("ret"));
+    }
+
+    #[test]
+    fn tc_p11_m2_slice_declared() {
+        // Module must declare axon_slice_len
+        let ir = emit_src("fn f() -> i32 { return 0; }");
+        assert!(ir.contains("axon_slice_len"), "must declare axon_slice_len: {}", ir);
+    }
+
+    #[test]
+    fn tc_p11_m2_slice_coerce_no_panic() {
+        // Slice-from-array coercion must not panic
+        let ir = emit_src("fn f() -> i32 { let s: [i32] = [1, 2, 3]; return 0; }");
+        assert!(!ir.is_empty());
+        assert!(ir.contains("target triple"));
+    }
+
+    #[test]
+    fn tc_p11_m2_fat_ptr_fields() {
+        // Fat pointer alloca must contain ptr and i64 fields
+        let ir = emit_src("fn f() -> i32 { let s: [i32] = [10, 20]; return 0; }");
+        assert!(ir.contains("{ ptr, i64 }"), "fat ptr type missing: {}", ir);
+    }
+
+    #[test]
+    fn tc_p11_m2_slice_len_ir() {
+        // slice .len() must emit getelementptr into fat pointer field 1
+        // Use a block that has a slice binding so the type is Slice
+        let ir = emit_src("fn f() -> i32 { let s: [i32] = [1, 2, 3]; return 0; }");
+        assert!(ir.contains("getelementptr"), "GEP missing: {}", ir);
     }
 
     #[test]

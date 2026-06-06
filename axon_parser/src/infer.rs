@@ -559,6 +559,14 @@ impl ConstraintGen {
                 let recv_ty = self.generate_expr(recv);
                 for arg in args { self.generate_expr(arg); }
                 // M2: String method return types
+                // P11-M2: slice method return types
+                if matches!(recv_ty, InfTy::Slice(_)) {
+                    return match method.as_str() {
+                        "len"      => InfTy::Usize,
+                        "is_empty" => InfTy::Bool,
+                        _          => self.fresh_var(),
+                    };
+                }
                 if matches!(recv_ty, InfTy::String) {
                     return match method.as_str() {
                         "len"          => InfTy::Usize,
