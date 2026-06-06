@@ -90,12 +90,14 @@ pub struct LlvmEmitter {
     string_literals: Vec<String>,
     /// P14-M1: struct name → ordered field names (for GEP index lookup)
     struct_defs: std::collections::HashMap<String, Vec<String>>,
+    /// P16-M1: (trait_name, type_name) → ordered method names
+    vtable_registry: std::collections::HashMap<(String, String), Vec<String>>,
 }
 
 #[allow(clippy::new_without_default)]
 impl LlvmEmitter {
     pub fn new() -> Self {
-        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, string_literals: Vec::new(), struct_defs: std::collections::HashMap::new() }
+        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, string_literals: Vec::new(), struct_defs: std::collections::HashMap::new(), vtable_registry: std::collections::HashMap::new() }
     }
     fn emit_line(&mut self, line: &str) {
         self.output.push_str(line);
@@ -175,6 +177,46 @@ impl LlvmEmitter {
                 self.emit_line(&format!("@{} = constant {} undef", name, emit_llvm_ty(ty)));
                 self.emit_blank();
             }
+            HirItem::Impl(imp) => {
+                // P16-M1: emit vtable global for trait impls
+                if let Some(trait_name) = &imp.trait_ {
+                    let type_name = match &imp.self_ty {
+                        HirTy::Named(n, _) => n.clone(),
+                        _ => return,
+                    };
+                    let method_names: Vec<String> = imp.methods.iter()
+                        .map(|m| m.name.clone())
+                        .collect();
+                    let ptr_list: Vec<String> = method_names.iter()
+                        .map(|m| format!("ptr @{}_{}", type_name, m))
+                        .collect();
+                    let vtable_ty = if method_names.is_empty() {
+                        "{}".to_string()
+                    } else {
+                        format!("{{ {} }}", vec!["ptr"; method_names.len()].join(", "))
+                    };
+                    let vtable_val = if ptr_list.is_empty() {
+                        "{}".to_string()
+                    } else {
+                        format!("{{ {} }}", ptr_list.join(", "))
+                    };
+                    self.emit_line(&format!(
+                        "@vtable_{}_{} = global {} {}",
+                        trait_name, type_name, vtable_ty, vtable_val
+                    ));
+                    self.emit_blank();
+                    self.vtable_registry.insert(
+                        (trait_name.clone(), type_name.clone()),
+                        method_names,
+                    );
+                    for method in &imp.methods {
+                        let mut mangled = method.clone();
+                        mangled.name = format!("{}_{}", type_name, method.name);
+                        self.emit_fn(&mangled);
+                    }
+                }
+            }
+            HirItem::Trait(_) => {}
             _ => {}
         }
     }
@@ -1385,6 +1427,46 @@ fn main() -> i32 { return 0; }
         println!("MATCH IR:\n{}", ir);
         assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
         assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
+    // ── Phase 16 M1 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_vtable_emit() {
+        // impl Foo for Bar must emit @vtable_Foo_Bar global in IR
+        let src = r#"
+            trait Foo { fn speak(x: i32) -> i32 { return 0; } }
+            struct Bar { x: i32, }
+            impl Foo for Bar { fn speak(x: i32) -> i32 { return x; } }
+        "#;
+        let ir = emit_src(src);
+        assert!(ir.contains("@vtable_Foo_Bar"),
+            "IR must contain @vtable_Foo_Bar, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_vtable_emit_method_ptr() {
+        // vtable must reference the mangled method @Bar_speak
+        let src = r#"
+            trait Foo { fn speak(x: i32) -> i32 { return 0; } }
+            struct Bar { x: i32, }
+            impl Foo for Bar { fn speak(x: i32) -> i32 { return x; } }
+        "#;
+        let ir = emit_src(src);
+        assert!(ir.contains("@Bar_speak"),
+            "IR must contain mangled method @Bar_speak, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_vtable_no_emit_for_inherent_impl() {
+        // impl Bar (no trait) must NOT emit a vtable
+        let src = r#"
+            struct Bar { x: i32, }
+            impl Bar { fn new(x: i32) -> i32 { return x; } }
+        "#;
+        let ir = emit_src(src);
+        assert!(!ir.contains("@vtable_"),
+            "inherent impl must not emit vtable, got:\n{}", ir);
     }
 
     fn tc_p11_m3_no_panic_on_named_ty() {
