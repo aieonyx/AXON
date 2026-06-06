@@ -138,6 +138,7 @@ pub enum HirTy {
     Char, Str,
     String,                                      // heap-owned string (distinct from Str slice)
     Unit,
+    Dyn(String),
     Never,
     Ref(bool, Option<String>, Box<HirTy>),   // is_mut, lifetime, inner
     Ptr(bool, Box<HirTy>),
@@ -738,6 +739,7 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                 let r = ret.as_ref().map(|t| self.lower_ty(t)).unwrap_or(HirTy::Unit);
                 HirTy::Fn(p, Box::new(r))
             }
+            Ty::Dyn(name) => HirTy::Dyn(name.clone()),
             Ty::Never => HirTy::Never,
             Ty::Infer => HirTy::Infer,
         }

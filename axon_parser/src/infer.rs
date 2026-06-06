@@ -108,6 +108,7 @@ pub fn hir_to_inf(ty: &HirTy) -> InfTy {
         HirTy::Tuple(ts)    => InfTy::Tuple(ts.iter().map(hir_to_inf).collect()),
         HirTy::Named(n, ts) => InfTy::Named(n.clone(), ts.iter().map(hir_to_inf).collect()),
         HirTy::Fn(ps, r)    => InfTy::Fn(ps.iter().map(hir_to_inf).collect(), Box::new(hir_to_inf(r))),
+        HirTy::Dyn(n)       => InfTy::Named(n.clone(), vec![]), // dyn Trait → opaque named type
         HirTy::Infer        => InfTy::Var(TyVar(u32::MAX)), // placeholder; replaced by fresh var
         HirTy::Error        => InfTy::Error("error".into()),
     }
