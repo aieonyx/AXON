@@ -234,6 +234,68 @@ pub fn format_chain(chain: &[String]) -> String {
 }
 
 // ============================================================
+// FFI CAP INFERENCE
+// ============================================================
+
+/// Infer capability requirements from a C foreign function name.
+/// Called during Phase 21 extern block parsing; available as a
+/// standalone lookup now so the table is built and tested in Phase 15.
+///
+/// Rule: unrecognised foreign symbols are tagged with the most
+/// restrictive cap that matches their name pattern.
+/// Unknown names return an empty vec — caller decides policy.
+pub fn infer_ffi_caps(fn_name: &str) -> Vec<String> {
+    let name = fn_name.to_lowercase();
+    let mut caps: Vec<String> = Vec::new();
+
+    // Network: connect/socket/send/recv family
+    let network_patterns = [
+        "connect", "socket", "send", "recv",
+        "bind", "listen", "sendto", "recvfrom",
+        "gethostbyname", "getaddrinfo", "inet_",
+    ];
+    if network_patterns.iter().any(|p| name == *p || name.starts_with(p)) {
+        caps.push("network_connect".to_string());
+    }
+
+    // Filesystem write: open/write/unlink/rename family
+    let file_write_patterns = [
+        "write", "fwrite", "pwrite", "writev",
+        "unlink", "rename", "mkdir", "rmdir",
+        "chmod", "chown", "truncate", "ftruncate",
+        "creat", "mknod",
+    ];
+    if file_write_patterns.iter().any(|p| name == *p || name.starts_with(p)) {
+        caps.push("file_write".to_string());
+    }
+
+    // Filesystem read: open/read/stat family
+    // Note: "open" can read or write — conservatively tag file_read;
+    // writers already caught above by creat/write patterns.
+    let file_read_patterns = [
+        "open", "read", "fread", "pread", "readv",
+        "stat", "fstat", "lstat", "readdir", "opendir",
+        "access", "realpath", "getcwd",
+    ];
+    if file_read_patterns.iter().any(|p| name == *p || name.starts_with(p)) {
+        if !caps.contains(&"file_read".to_string()) {
+            caps.push("file_read".to_string());
+        }
+    }
+
+    // Process spawn: fork/exec family
+    let spawn_patterns = [
+        "fork", "exec", "execve", "execvp", "execle",
+        "posix_spawn", "clone", "vfork",
+    ];
+    if spawn_patterns.iter().any(|p| name == *p || name.starts_with(p)) {
+        caps.push("spawn".to_string());
+    }
+
+    caps
+}
+
+// ============================================================
 // TESTS
 // ============================================================
 
@@ -342,6 +404,64 @@ mod tests {
         let chain = info.cap_chains.get("network_connect").expect("chain must be recorded");
         assert!(chain.contains(&"wrapper".to_string()));
         assert!(chain.contains(&"send".to_string()));
+    }
+
+    // ── Phase 15 M3 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_cap_ffi_connect_infers_network() {
+        let caps = super::infer_ffi_caps("connect");
+        assert!(caps.contains(&"network_connect".to_string()),
+            "connect must infer network_connect, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_cap_ffi_socket_infers_network() {
+        let caps = super::infer_ffi_caps("socket");
+        assert!(caps.contains(&"network_connect".to_string()),
+            "socket must infer network_connect, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_cap_ffi_open_infers_file_read() {
+        let caps = super::infer_ffi_caps("open");
+        assert!(caps.contains(&"file_read".to_string()),
+            "open must infer file_read, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_cap_ffi_write_infers_file_write() {
+        let caps = super::infer_ffi_caps("write");
+        assert!(caps.contains(&"file_write".to_string()),
+            "write must infer file_write, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_cap_ffi_fork_infers_spawn() {
+        let caps = super::infer_ffi_caps("fork");
+        assert!(caps.contains(&"spawn".to_string()),
+            "fork must infer spawn, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_cap_ffi_execve_infers_spawn() {
+        let caps = super::infer_ffi_caps("execve");
+        assert!(caps.contains(&"spawn".to_string()),
+            "execve must infer spawn, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_cap_ffi_unknown_fn_no_caps() {
+        let caps = super::infer_ffi_caps("memcpy");
+        assert!(caps.is_empty(),
+            "memcpy must infer no caps, got: {:?}", caps);
+    }
+
+    #[test]
+    fn tc_cap_ffi_case_insensitive() {
+        let caps = super::infer_ffi_caps("Connect");
+        assert!(caps.contains(&"network_connect".to_string()),
+            "Connect (uppercase) must infer network_connect, got: {:?}", caps);
     }
 
     #[test]
