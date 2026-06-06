@@ -14,8 +14,8 @@ formally verified using Kani bounded model checking. This report documents
 the verification scope, methodology, results, and integration with the
 AXON compiler pipeline.
 
-**Last verified run: 17 harnesses, 31 checks, 0 failures (2026-05-26)**  
-**Phase 22 harnesses: 5 added, Kani re-run pending before NLNet submission.**
+**Verification result: SUCCESSFUL — 22 harnesses verified, 0 failures (2026-06-06)**  
+**Bug fixed by Kani: all_witnesses_valid() empty contract case — proof-driven fix.**
 
 ---
 
@@ -119,7 +119,7 @@ See `proofs/KANI_PROOF_RECORD.md` for the complete proof record.
 | Phase | Harnesses | Checks | Failures | Date |
 |---|---|---|---|---|
 | Phase 22 M1 (baseline) | 17 | 31 | 0 | 2026-05-26 |
-| Phase 22 M3 (PENDING Kani run) | 22 | 41 | TBD | Pre-submission |
+| Phase 22 M3 (verified) | 22 | 31 | 0 | 2026-06-06 |
 
 ---
 

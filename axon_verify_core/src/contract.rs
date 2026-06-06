@@ -98,8 +98,10 @@ impl EnsuresContract {
     pub const fn has_witness(&self) -> bool { self.witness_count > 0 }
 
     /// Returns true if ALL present witnesses are valid.
+    /// Returns false if there are no witnesses (unwitnessed contracts rejected).
     #[inline]
     pub fn all_witnesses_valid(&self) -> bool {
+        if self.witness_count == 0 { return false; }
         let mut i = 0;
         while i < self.witness_count {
             if let Some(w) = self.witnesses[i] {
