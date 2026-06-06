@@ -110,3 +110,117 @@ impl EnsuresContract {
         true
     }
 }
+
+// ── Phase 22 M3: Kani proof harnesses for EnsuresContract ────────────────────
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    #[kani::proof]
+    fn empty_contract_has_no_witnesses() {
+        // PROVES: empty() always creates a contract with witness_count == 0
+        let c = EnsuresContract::empty();
+        assert!(!c.has_witness());
+        assert_eq!(c.witness_count, 0);
+    }
+
+    #[kani::proof]
+    fn add_witness_increments_count() {
+        // PROVES: add_witness on empty contract sets witness_count to 1
+        let mut c = EnsuresContract::empty();
+        let w = Witness { kind: WitnessKind::Postcondition, valid: true, hash: kani::any() };
+        let added = c.add_witness(w);
+        assert!(added);
+        assert_eq!(c.witness_count, 1);
+        assert!(c.has_witness());
+    }
+
+    #[kani::proof]
+    fn all_witnesses_valid_empty_is_false() {
+        // PROVES: empty contract fails all_witnesses_valid
+        let c = EnsuresContract::empty();
+        assert!(!c.all_witnesses_valid());
+    }
+
+    #[kani::proof]
+    fn all_witnesses_valid_one_invalid_is_false() {
+        // PROVES: one invalid witness causes all_witnesses_valid to return false
+        let mut c = EnsuresContract::empty();
+        c.add_witness(Witness { kind: WitnessKind::Postcondition, valid: false, hash: 1 });
+        assert!(!c.all_witnesses_valid());
+    }
+
+    #[kani::proof]
+    fn add_witness_capacity_limit() {
+        // PROVES: cannot add more than 8 witnesses (capacity limit)
+        let mut c = EnsuresContract::empty();
+        for i in 0..8u64 {
+            let added = c.add_witness(Witness {
+                kind: WitnessKind::Postcondition, valid: true, hash: i
+            });
+            assert!(added);
+        }
+        // 9th add must fail
+        let overflow = c.add_witness(Witness {
+            kind: WitnessKind::Postcondition, valid: true, hash: 99
+        });
+        assert!(!overflow);
+        assert_eq!(c.witness_count, 8);
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    // ── Phase 22 M3 unit tests ────────────────────────────────────────────────
+
+    #[test]
+    fn tc_ensures_contract_empty() {
+        let c = EnsuresContract::empty();
+        assert!(!c.has_witness());
+        assert_eq!(c.witness_count, 0);
+    }
+
+    #[test]
+    fn tc_ensures_contract_add_witness() {
+        let mut c = EnsuresContract::empty();
+        let added = c.add_witness(Witness {
+            kind: WitnessKind::Postcondition, valid: true, hash: 1
+        });
+        assert!(added);
+        assert!(c.has_witness());
+        assert_eq!(c.witness_count, 1);
+    }
+
+    #[test]
+    fn tc_ensures_contract_all_valid() {
+        let mut c = EnsuresContract::empty();
+        c.add_witness(Witness { kind: WitnessKind::Postcondition, valid: true, hash: 1 });
+        c.add_witness(Witness { kind: WitnessKind::Precondition, valid: true, hash: 2 });
+        assert!(c.all_witnesses_valid());
+    }
+
+    #[test]
+    fn tc_ensures_contract_one_invalid() {
+        let mut c = EnsuresContract::empty();
+        c.add_witness(Witness { kind: WitnessKind::Postcondition, valid: true,  hash: 1 });
+        c.add_witness(Witness { kind: WitnessKind::Precondition,  valid: false, hash: 2 });
+        assert!(!c.all_witnesses_valid());
+    }
+
+    #[test]
+    fn tc_ensures_contract_capacity() {
+        let mut c = EnsuresContract::empty();
+        for i in 0..8u64 {
+            assert!(c.add_witness(Witness {
+                kind: WitnessKind::Postcondition, valid: true, hash: i
+            }));
+        }
+        // 9th must fail
+        assert!(!c.add_witness(Witness {
+            kind: WitnessKind::Postcondition, valid: true, hash: 99
+        }));
+        assert_eq!(c.witness_count, 8);
+    }
+}
