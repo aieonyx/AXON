@@ -1493,6 +1493,38 @@ fn main() -> i32 { return 0; }
         assert!(ir.contains("phi i32"), "missing phi merge for match");
     }
 
+    // ── Phase 20 M4 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_p20_integration() {
+        // Full program: seL4 IPC types + IPC intrinsic + cap annotation.
+        // fn send_ipc takes sel4_endpoint and sel4_msginfo, calls axon_ipc_call.
+        // IR must contain: seL4 types as i64, @axon_ipc_call, IPC declare stubs.
+        let src = r#"
+            #[cap(ipc_send)]
+            fn send_ipc(ep: sel4_endpoint, msg: sel4_msginfo) -> i64 {
+                return axon_ipc_call(ep, msg);
+            }
+        "#;
+        let ir = emit_src(src);
+
+        // seL4 endpoint and msginfo params emit as i64
+        assert!(ir.contains("i64 %"),
+            "seL4 types must emit as i64 params, got:\n{}", ir);
+
+        // IPC intrinsic call present
+        assert!(ir.contains("@axon_ipc_call"),
+            "IR must contain @axon_ipc_call, got:\n{}", ir);
+
+        // IPC declare stubs present
+        assert!(ir.contains("declare i64 @axon_ipc_call"),
+            "IR must declare axon_ipc_call, got:\n{}", ir);
+
+        // Function is internal (non-pub, not main)
+        assert!(ir.contains("internal"),
+            "non-pub fn must have internal linkage, got:\n{}", ir);
+    }
+
     // ── Phase 20 M2 ──────────────────────────────────────────────────────────
 
     #[test]
