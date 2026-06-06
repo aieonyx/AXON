@@ -137,6 +137,8 @@ impl LlvmEmitter {
         // P12-M4: iterator runtime externs
         self.emit_line("declare ptr @axon_range_new(i64, i64)");
         self.emit_line("declare %AxonIterResult @axon_iter_next(ptr)");
+        // P13-M4-DECLARE-DROP
+        self.emit_line("declare void @axon_iter_drop(ptr)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -567,6 +569,8 @@ impl LlvmEmitter {
                 self.emit_expr(body);
                 self.emit_line(&format!("  br label %{}", loop_l));
                 self.emit_line(&format!("{}:", exit_l));
+                // P13-M4-ITER-DROP: apoptosis — drop fires exactly once at exit
+                self.emit_line(&format!("  call void @axon_iter_drop(ptr {})", iter_ptr));
                 None
             }
             _ => None,
