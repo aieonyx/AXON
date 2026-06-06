@@ -22,4 +22,6 @@ pub mod profile;
 pub mod capflow;
 pub mod mono;
 pub mod borrow;
+#[cfg(test)]
+mod verify_integration;
 pub mod driver;

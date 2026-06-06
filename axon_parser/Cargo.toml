@@ -10,6 +10,7 @@ license     = "SEE LICENSE FILE"
 axon_lexer = { path = "../axon_lexer" }
 
 [dev-dependencies]
+axon_verify_core = { path = "../axon_verify_core" }
 
 [features]
 default = []
