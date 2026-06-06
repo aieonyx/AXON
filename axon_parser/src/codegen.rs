@@ -132,7 +132,8 @@ impl LlvmEmitter {
         self.emit_line("declare ptr @axon_vec_get(ptr, i64)");
         // P12-M4: iterator runtime externs
         self.emit_line("declare ptr @axon_range_new(i64, i64)");
-        self.emit_line("declare ptr @axon_iter_next(ptr)");
+        self.emit_line("%AxonIterResult = type { i8, i64 }");
+        self.emit_line("declare %AxonIterResult @axon_iter_next(ptr)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -521,16 +522,18 @@ impl LlvmEmitter {
                 self.emit_line(&format!("{}:", loop_l));
                 let opt = self.ssa.fresh_tmp();
                 self.emit_line(&format!(
-                    "  {} = call ptr @axon_iter_next(ptr {})", opt, iter_ptr
+                    "  {} = call %AxonIterResult @axon_iter_next(ptr {})", opt, iter_ptr
                 ));
-                let tag_ptr = self.ssa.fresh_tmp();
+                // P13-M1-FORARM-CLEAN: extractvalue-only tag/val from {i8,i64} struct
                 let tag_val = self.ssa.fresh_tmp();
+                let iter_val = self.ssa.fresh_tmp();
                 let cond    = self.ssa.fresh_tmp();
                 self.emit_line(&format!(
-                    "  {} = getelementptr inbounds {{i8, i64}}, ptr {}, i32 0, i32 0",
-                    tag_ptr, opt
+                    "  {} = extractvalue %AxonIterResult {}, 0", tag_val, opt
                 ));
-                self.emit_line(&format!("  {} = load i8, ptr {}", tag_val, tag_ptr));
+                self.emit_line(&format!(
+                    "  {} = extractvalue %AxonIterResult {}, 1", iter_val, opt
+                ));
                 self.emit_line(&format!("  {} = icmp eq i8 {}, 0", cond, tag_val));
                 self.emit_line(&format!(
                     "  br i1 {}, label %{}, label %{}", cond, exit_l, body_l
@@ -538,17 +541,10 @@ impl LlvmEmitter {
                 self.emit_line(&format!("{}:", body_l));
                 // P12-M4 audit fix: extract value field and bind to loop variable
                 if let crate::hir::HirPat::Bind(place_id, _) = pat {
-                    let val_ptr = self.ssa.fresh_tmp();
-                    let val     = self.ssa.fresh_tmp();
-                    self.emit_line(&format!(
-                        "  {} = getelementptr inbounds {{i8, i64}}, ptr {}, i32 0, i32 1",
-                        val_ptr, opt
-                    ));
-                    self.emit_line(&format!("  {} = load i64, ptr {}", val, val_ptr));
-                    // alloca for the loop variable
+                    // P13-M1: use iter_val already extracted from %AxonIterResult
                     let alloca = self.ssa.fresh_tmp();
                     self.emit_line(&format!("  {} = alloca i64", alloca));
-                    self.emit_line(&format!("  store i64 {}, ptr {}", val, alloca));
+                    self.emit_line(&format!("  store i64 {}, ptr {}", iter_val, alloca));
                     self.ssa.place_map.insert(*place_id, alloca);
                 }
                 self.emit_expr(body);

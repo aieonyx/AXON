@@ -4,10 +4,10 @@
 //! axon_core → axon_alloc → axon_pal → axon_pal_linux → axon_std
 
 // ── Module declarations ───────────────────────────────────────────────────────
-mod test_core;
-mod test_alloc;
-mod test_pal;
-mod test_verify;
-mod test_audit;
-mod test_ai;
-mod test_pipeline;
+#[cfg(test)] mod test_core;
+#[cfg(test)] mod test_alloc;
+#[cfg(test)] mod test_pal;
+#[cfg(test)] mod test_verify;
+#[cfg(test)] mod test_audit;
+#[cfg(test)] mod test_ai;
+#[cfg(test)] mod test_pipeline;
