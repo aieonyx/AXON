@@ -245,7 +245,9 @@ impl LlvmEmitter {
         }).collect();
         let ret_ty = emit_llvm_ty(&f.ret);
         // main() is always public — linker requires it
-        let linkage = ""; // External linkage: required for cross-object linking (seL4 PD, FFI, ARPi)
+        // P19-QA: non-pub fns get internal linkage (LLVM IPO + tc5 fix)
+        // Exception: main must always be external (linker entry point)
+        let linkage = if f.is_pub || f.name == "main" { "" } else { "internal " };
         if matches!(f.ret, HirTy::Unit | HirTy::Never) {
             self.emit_line(&format!("define {}void @{}({}) {{", linkage, f.name, params.join(", ")));
         } else {
