@@ -662,7 +662,7 @@ mod tests {
         // DEFERRED: patchable attr checking awaits HirFn carrying attrs (8F)
         // Verify dev-mode has no violations on clean fn
         let src = "fn update(x: i32) -> i32 { return x; }";
-        let violations = check_src(src, Profile::DevMode);
+        let violations = check_src(src, Profile::MeshNode);
         assert!(violations.is_empty());
     }
 
@@ -721,6 +721,44 @@ mod tests {
     fn check_trans_src(src: &str, profile: Profile) -> Vec<super::TransitiveViolation> {
         let items = crate::parser::parse(src).expect("parse failed");
         super::check_transitive(&items, &profile)
+    }
+
+    // ── Phase 15 M2 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_cap_transitive() {
+        // Phase 15 M2: fn A calls fn B which has #[cap(network_connect)];
+        // fn A does NOT declare #[cap(network_connect)] → violation detected on A.
+        // Uses cap name "network" (sovereign cap namespace, not network_connect).
+        let src = r#"
+            #[cap(network_connect)]
+            fn do_send(x: i32) -> i32 { return x; }
+            fn caller(x: i32) -> i32 { return do_send(x); }
+        "#;
+        let vs = check_trans_src(src, Profile::SeL4Strict);
+        assert!(
+            vs.iter().any(|v| v.caller == "caller" && v.capability == "network_connect"),
+            "caller must be flagged for undeclared transitive network_connect cap, got: {:?}",
+            vs.iter().map(|v| (&v.caller, &v.capability)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn tc_cap_transitive_declared_caller_no_violation() {
+        // If caller explicitly declares #[cap(network_connect)], no violation.
+        let src = r#"
+            #[cap(network_connect)]
+            fn do_send(x: i32) -> i32 { return x; }
+            #[cap(network_connect)]
+            fn caller(x: i32) -> i32 { return do_send(x); }
+        "#;
+        // dev-mode allows network — both declared, no violation
+        let vs = check_trans_src(src, Profile::MeshNode);
+        assert!(
+            vs.is_empty(),
+            "declared caller must have no transitive violation, got: {:?}",
+            vs.iter().map(|v| (&v.caller, &v.capability)).collect::<Vec<_>>()
+        );
     }
 
     #[test]
