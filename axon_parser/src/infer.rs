@@ -109,7 +109,9 @@ pub fn hir_to_inf(ty: &HirTy) -> InfTy {
         HirTy::Named(n, ts) => InfTy::Named(n.clone(), ts.iter().map(hir_to_inf).collect()),
         HirTy::Fn(ps, r)    => InfTy::Fn(ps.iter().map(hir_to_inf).collect(), Box::new(hir_to_inf(r))),
         HirTy::Param(n)     => InfTy::Named(n.clone(), vec![]), // P17-M1: param → opaque named
-        HirTy::Dyn(n)       => InfTy::Named(n.clone(), vec![]), // dyn Trait → opaque named type
+        HirTy::Dyn(n)       => InfTy::Named(n.clone(), vec![]),
+        // P20-M1: seL4 types map to U64 in the inference engine
+        HirTy::SeL4Endpoint | HirTy::SeL4Badge | HirTy::SeL4MsgInfo => InfTy::U64, // dyn Trait → opaque named type
         HirTy::Infer        => InfTy::Var(TyVar(u32::MAX)), // placeholder; replaced by fresh var
         HirTy::Error        => InfTy::Error("error".into()),
     }

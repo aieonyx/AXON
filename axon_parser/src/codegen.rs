@@ -34,6 +34,10 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::Unit   => "void",
         HirTy::Param(_) => "i64", // P17-M1: uninstantiated generic — conservative i64
         HirTy::Dyn(_)  => "ptr",
+        // P20-M1: seL4 IPC types — capability slots are u64 words in seL4 ABI
+        HirTy::SeL4Endpoint => "i64",
+        HirTy::SeL4Badge    => "i64",
+        HirTy::SeL4MsgInfo  => "i64",
         HirTy::Never  => "void",
         HirTy::Str    => "ptr",
         HirTy::Slice(_) => "ptr",   // fat pointer alloca passed as ptr
