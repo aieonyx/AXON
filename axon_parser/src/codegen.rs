@@ -31,6 +31,7 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::F64    => "double",
         HirTy::Char   => "i32",
         HirTy::Unit   => "void",
+        HirTy::Param(_) => "i64", // P17-M1: uninstantiated generic — conservative i64
         HirTy::Dyn(_)  => "ptr",
         HirTy::Never  => "void",
         HirTy::Str    => "ptr",

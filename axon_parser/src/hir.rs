@@ -148,6 +148,7 @@ pub enum HirTy {
     Named(String, Vec<HirTy>),               // name, type args
     Fn(Vec<HirTy>, Box<HirTy>),
     Infer,                                    // type hole — filled by 8B
+    Param(String),                               // P17-M1: generic type parameter
     Error,                                    // sentinel for bad types
 }
 
@@ -158,7 +159,8 @@ impl HirTy {
             HirTy::I8 | HirTy::I16 | HirTy::I32 | HirTy::I64 | HirTy::I128 | HirTy::Isize |
             HirTy::U8 | HirTy::U16 | HirTy::U32 | HirTy::U64 | HirTy::U128 | HirTy::Usize |
             HirTy::F32 | HirTy::F64 |
-            HirTy::Unit | HirTy::Ref(false, _, _)
+            HirTy::Unit | HirTy::Ref(false, _, _) |
+            HirTy::Infer | HirTy::Param(_)
         )
     }
     pub fn is_ref(&self) -> bool { matches!(self, HirTy::Ref(_, _, _)) }
@@ -617,6 +619,33 @@ impl HirLowerer {
         }
     }
 
+
+    /// P17-M1: Substitute generic type param names with HirTy::Param.
+    /// Walks a HirTy and replaces Named("T",[]) with Param("T") when T ∈ generic_names.
+    fn resolve_ty_params(ty: HirTy, generic_names: &std::collections::HashSet<String>) -> HirTy {
+        match ty {
+            HirTy::Named(ref name, ref args) if args.is_empty() && generic_names.contains(name) => {
+                HirTy::Param(name.clone())
+            }
+            HirTy::Ref(m, lt, inner) =>
+                HirTy::Ref(m, lt, Box::new(Self::resolve_ty_params(*inner, generic_names))),
+            HirTy::Ptr(m, inner) =>
+                HirTy::Ptr(m, Box::new(Self::resolve_ty_params(*inner, generic_names))),
+            HirTy::Slice(inner) =>
+                HirTy::Slice(Box::new(Self::resolve_ty_params(*inner, generic_names))),
+            HirTy::Array(inner, n) =>
+                HirTy::Array(Box::new(Self::resolve_ty_params(*inner, generic_names)), n),
+            HirTy::Tuple(tys) =>
+                HirTy::Tuple(tys.into_iter().map(|t| Self::resolve_ty_params(t, generic_names)).collect()),
+            HirTy::Named(name, args) =>
+                HirTy::Named(name, args.into_iter().map(|t| Self::resolve_ty_params(t, generic_names)).collect()),
+            HirTy::Fn(ps, r) =>
+                HirTy::Fn(ps.into_iter().map(|t| Self::resolve_ty_params(t, generic_names)).collect(),
+                          Box::new(Self::resolve_ty_params(*r, generic_names))),
+            other => other,
+        }
+    }
+
     fn lower_fn(&mut self, sig: FnSig, body: Expr) -> HirFn {
         // H8 KNOWN-GAP: Complex parameter patterns (e.g. fn f((x,y): (i32,i32)))
         // are not yet destructured — only a single PlaceId per param is allocated.
@@ -630,7 +659,18 @@ impl HirLowerer {
             }
             (place, self.lower_ty(&p.ty))
         }).collect();
-        let ret = sig.ret.as_ref().map(|t| self.lower_ty(t)).unwrap_or(HirTy::Unit);
+        // P17-M1: build generic name set and re-resolve param/ret types
+        let generic_names: std::collections::HashSet<String> =
+            sig.generics.iter().map(|g| g.name.clone()).collect();
+        let params: Vec<(PlaceId, HirTy)> = if generic_names.is_empty() {
+            params
+        } else {
+            params.into_iter()
+                .map(|(p, ty)| (p, Self::resolve_ty_params(ty, &generic_names)))
+                .collect()
+        };
+        let ret_raw = sig.ret.as_ref().map(|t| self.lower_ty(t)).unwrap_or(HirTy::Unit);
+        let ret = if generic_names.is_empty() { ret_raw } else { Self::resolve_ty_params(ret_raw, &generic_names) };
         let contracts = sig.contracts.iter().map(|c| {
             HirContract {
                 kind: c.kind.clone(),
@@ -1193,6 +1233,45 @@ mod tests {
         // HirTy::Array must preserve length from parser
         let m = lower_src("fn f() -> i32 { let a: [i32; 5] = [1,2,3,4,5]; return 0; }");
         assert_eq!(m.errors.len(), 0);
+    }
+
+    // ── Phase 17 M1 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_generic_param_ty() {
+        // fn id<T>(x: T) -> T — param and ret must lower to HirTy::Param("T")
+        let m = lower_src("fn id<T>(x: T) -> T { return x; }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(matches!(&f.params[0].1, HirTy::Param(n) if n == "T"),
+                "param must be HirTy::Param(T), got: {:?}", f.params[0].1);
+            assert!(matches!(&f.ret, HirTy::Param(n) if n == "T"),
+                "ret must be HirTy::Param(T), got: {:?}", f.ret);
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_generic_param_two_params() {
+        // fn swap<A, B>(a: A, b: B) — each param gets its own Param variant
+        let m = lower_src("fn swap<A, B>(a: A, b: B) -> A { return a; }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(matches!(&f.params[0].1, HirTy::Param(n) if n == "A"),
+                "first param must be HirTy::Param(A), got: {:?}", f.params[0].1);
+            assert!(matches!(&f.params[1].1, HirTy::Param(n) if n == "B"),
+                "second param must be HirTy::Param(B), got: {:?}", f.params[1].1);
+        } else { panic!("expected fn"); }
+    }
+
+    #[test]
+    fn tc_generic_non_param_unaffected() {
+        // fn f<T>(x: i32) — non-generic param must stay HirTy::I32
+        let m = lower_src("fn f<T>(x: i32) -> i32 { return x; }");
+        assert_eq!(m.errors.len(), 0, "errors: {:?}", m.errors);
+        if let HirItem::Fn(f) = &m.items[0] {
+            assert!(matches!(&f.params[0].1, HirTy::I32),
+                "i32 param must stay HirTy::I32, got: {:?}", f.params[0].1);
+        } else { panic!("expected fn"); }
     }
 
     fn lower_src(src: &str) -> HirModule {
