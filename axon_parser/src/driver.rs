@@ -87,6 +87,10 @@ pub fn compile_sources(sources: &[&str]) -> HirModule {
     module
 }
 
+/// KNOWN GAP: cap enforcement (check_transitive) is not called by the driver.
+/// Capability violations are only caught if check_transitive is explicitly
+/// invoked after compile_sources/compile_files. Wiring into the driver
+/// is deferred to the compiler CLI integration pass.
 /// Parse and lower source files by reading from disk.
 /// Returns merged HirModule; parse/IO errors are collected into module.errors.
 pub fn compile_files(paths: &[&str]) -> HirModule {

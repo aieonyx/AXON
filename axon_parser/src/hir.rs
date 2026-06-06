@@ -1237,6 +1237,12 @@ fn collect_namespace(items: &[HirItem], prefix: &[String], ns: &mut std::collect
                 new_prefix.push(name.clone());
                 collect_namespace(inner, &new_prefix, ns);
             }
+            HirItem::ExternFn(name, _, _, _, _, _) => {
+                // P21-QA: register extern fn names in namespace for use resolution
+                let fq = if prefix.is_empty() { name.clone() }
+                         else { format!("{}::{}", prefix.join("::"), name) };
+                ns.insert(fq.clone(), fq);
+            }
             _ => {}
         }
     }
