@@ -498,6 +498,46 @@ impl LlvmEmitter {
                 for arg in args { self.emit_expr(arg); }
                 None
             }
+            // P12-M2: Range expression — call @axon_range_new(start, end)
+            HirExprKind::Range(start, end, _inclusive) => {
+                let sv = self.emit_expr(start).unwrap_or_else(|| "0".to_string());
+                let ev = self.emit_expr(end).unwrap_or_else(|| "0".to_string());
+                let tmp = self.ssa.fresh_tmp();
+                self.emit_line(&format!("  {} = call ptr @axon_range_new(i64 {}, i64 {})", tmp, sv, ev));
+                Some(tmp)
+            }
+            // P12-M4: for-loop over iterator
+            HirExprKind::For(_pat, iter, body) => {
+                let n = self.ssa.tmp_counter; self.ssa.tmp_counter += 4;
+                let loop_l = format!("for_loop_{}", n);
+                let body_l = format!("for_body_{}", n + 1);
+                let exit_l = format!("for_exit_{}", n + 2);
+                let iter_ptr = self.emit_expr(iter)
+                    .unwrap_or_else(|| "null".to_string());
+                self.emit_line(&format!("  br label %{}", loop_l));
+                self.emit_line(&format!("{}:", loop_l));
+                let opt = self.ssa.fresh_tmp();
+                self.emit_line(&format!(
+                    "  {} = call ptr @axon_iter_next(ptr {})", opt, iter_ptr
+                ));
+                let tag_ptr = self.ssa.fresh_tmp();
+                let tag_val = self.ssa.fresh_tmp();
+                let cond    = self.ssa.fresh_tmp();
+                self.emit_line(&format!(
+                    "  {} = getelementptr inbounds {{i8, i64}}, ptr {}, i32 0, i32 0",
+                    tag_ptr, opt
+                ));
+                self.emit_line(&format!("  {} = load i8, ptr {}", tag_val, tag_ptr));
+                self.emit_line(&format!("  {} = icmp eq i8 {}, 0", cond, tag_val));
+                self.emit_line(&format!(
+                    "  br i1 {}, label %{}, label %{}", cond, exit_l, body_l
+                ));
+                self.emit_line(&format!("{}:", body_l));
+                self.emit_expr(body);
+                self.emit_line(&format!("  br label %{}", loop_l));
+                self.emit_line(&format!("{}:", exit_l));
+                None
+            }
             _ => None,
         }
     }
@@ -1196,3 +1236,5 @@ void axon_print_int(long long n) { printf("%lld", n); }
     }
 
 }
+
+// P12-M4-APPLIED
