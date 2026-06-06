@@ -88,12 +88,14 @@ pub struct LlvmEmitter {
     fn_returned: bool,
     /// M2: accumulated LLVM global string constants
     string_literals: Vec<String>,
+    /// P14-M1: struct name → ordered field names (for GEP index lookup)
+    struct_defs: std::collections::HashMap<String, Vec<String>>,
 }
 
 #[allow(clippy::new_without_default)]
 impl LlvmEmitter {
     pub fn new() -> Self {
-        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, string_literals: Vec::new() }
+        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, string_literals: Vec::new(), struct_defs: std::collections::HashMap::new() }
     }
     fn emit_line(&mut self, line: &str) {
         self.output.push_str(line);
@@ -158,6 +160,11 @@ impl LlvmEmitter {
                     .map(|(_, ty, _)| emit_llvm_ty_owned(ty))
                     .collect();
                 self.emit_line(&format!("%struct.{} = type {{ {} }}", s.name, fields.join(", ")));
+                // P14-M1: register field names for GEP index lookup
+                let field_names: Vec<String> = s.fields.iter()
+                    .map(|(name, _, _)| name.clone())
+                    .collect();
+                self.struct_defs.insert(s.name.clone(), field_names);
                 self.emit_blank();
             }
             HirItem::Enum(e) => {
@@ -572,6 +579,139 @@ impl LlvmEmitter {
                 // P13-M4-ITER-DROP: apoptosis — drop fires exactly once at exit
                 self.emit_line(&format!("  call void @axon_iter_drop(ptr {})", iter_ptr));
                 None
+            }
+            // P14-M1: struct literal — alloca %struct.Name + store each field
+            HirExprKind::Struct(name, field_inits) => {
+                let struct_ty = format!("%struct.{}", name);
+                let alloca = self.ssa.fresh_tmp();
+                self.emit_line(&format!("  {} = alloca {}", alloca, struct_ty));
+                let field_names = self.struct_defs.get(name).cloned().unwrap_or_default();
+                for (fname, fexpr) in field_inits {
+                    if let Some(val) = self.emit_expr(fexpr) {
+                        let idx = field_names.iter().position(|n| n == fname).unwrap_or(0);
+                        let fty = emit_llvm_ty(&fexpr.ty);
+                        let gep = self.ssa.fresh_tmp();
+                        self.emit_line(&format!(
+                            "  {} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}",
+                            gep, struct_ty, alloca, idx
+                        ));
+                        self.emit_line(&format!("  store {} {}, ptr {}", fty, val, gep));
+                    }
+                }
+                Some(alloca)
+            }
+            // P14-M1: field access — GEP into struct alloca + load
+            HirExprKind::Field(base, fname, place_id) => {
+                let struct_name = match &base.ty {
+                    HirTy::Named(n, _) => n.clone(),
+                    _ => String::new(),
+                };
+                let base_ptr = self.emit_expr(base)?;
+                let field_names = self.struct_defs.get(&struct_name).cloned().unwrap_or_default();
+                let idx = field_names.iter().position(|n| n == fname).unwrap_or(0);
+                let struct_ty = format!("%struct.{}", struct_name);
+                let fty = emit_llvm_ty(&expr.ty);
+                let gep = self.ssa.fresh_tmp();
+                self.emit_line(&format!(
+                    "  {} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}",
+                    gep, struct_ty, base_ptr, idx
+                ));
+                let tmp = self.ssa.fresh_tmp();
+                self.emit_line(&format!("  {} = load {}, ptr {}", tmp, fty, gep));
+                // P14-M1: register field result type so downstream Place loads resolve correctly
+                self.ssa.place_type_map.insert(*place_id, fty.to_string());
+                Some(tmp)
+            }
+            // P14-M2: match expression — icmp chain + phi merge
+            HirExprKind::Match(scrutinee, arms) => {
+                let scrut = self.emit_expr(scrutinee)?;
+                let scrut_ty = emit_llvm_ty(&scrutinee.ty);
+                let n = self.ssa.tmp_counter;
+                self.ssa.tmp_counter += (arms.len() * 2 + 2) as u32;
+                let merge_l = format!("match_merge_{}", n + (arms.len() * 2) as u32);
+
+                // One check-block and one body-block per arm; wildcard/bind skips icmp
+                let mut arm_labels: Vec<(String, String)> = Vec::new(); // (check, body)
+                for i in 0..arms.len() {
+                    arm_labels.push((
+                        format!("match_check_{}_{}", n, i),
+                        format!("match_body_{}_{}", n, i),
+                    ));
+                }
+
+                // Jump into first check
+                self.emit_line(&format!("  br label %{}", arm_labels[0].0));
+
+                let mut phi_entries: Vec<(String, String)> = Vec::new(); // (val, label)
+
+                for (i, arm) in arms.iter().enumerate() {
+                    let (check_l, body_l) = &arm_labels[i];
+                    let next_check = if i + 1 < arm_labels.len() {
+                        arm_labels[i + 1].0.clone()
+                    } else {
+                        merge_l.clone() // no more arms — fall to merge (unreachable in well-formed match)
+                    };
+
+                    self.emit_line(&format!("{}:", check_l));
+
+                    match &arm.pat {
+                        crate::hir::HirPat::Lit(lit) => {
+                            let lit_val = match lit {
+                                crate::hir::HirLit::Int(v)  => v.to_string(),
+                                crate::hir::HirLit::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
+                                _ => "0".to_string(),
+                            };
+                            let cmp = self.ssa.fresh_tmp();
+                            self.emit_line(&format!(
+                                "  {} = icmp eq {} {}, {}",
+                                cmp, scrut_ty, scrut, lit_val
+                            ));
+                            self.emit_line(&format!(
+                                "  br i1 {}, label %{}, label %{}", cmp, body_l, next_check
+                            ));
+                        }
+                        crate::hir::HirPat::Wildcard => {
+                            // Unconditional fall into body
+                            self.emit_line(&format!("  br label %{}", body_l));
+                        }
+                        crate::hir::HirPat::Bind(place_id, _) => {
+                            // Bind scrutinee value to place, then fall into body
+                            let alloca = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = alloca {}", alloca, scrut_ty));
+                            self.emit_line(&format!("  store {} {}, ptr {}", scrut_ty, scrut, alloca));
+                            self.ssa.place_map.insert(*place_id, alloca);
+                            self.ssa.place_type_map.insert(*place_id, scrut_ty.to_string());
+                            self.emit_line(&format!("  br label %{}", body_l));
+                        }
+                        _ => {
+                            self.emit_line(&format!("  br label %{}", body_l));
+                        }
+                    }
+
+                    self.emit_line(&format!("{}:", body_l));
+                    let body_val = self.emit_expr(&arm.body);
+                    // Capture last block label for phi (body may have emitted sub-blocks)
+                    let from_label = body_l.clone();
+                    self.emit_line(&format!("  br label %{}", merge_l));
+                    if let Some(v) = body_val {
+                        phi_entries.push((v, from_label));
+                    }
+                }
+
+                self.emit_line(&format!("{}:", merge_l));
+                if phi_entries.len() == arms.len() {
+                    // All arms produce a value — emit phi
+                    let result_ty = emit_llvm_ty(&expr.ty);
+                    let phi = self.ssa.fresh_tmp();
+                    let phi_args: String = phi_entries.iter()
+                        .map(|(v, lbl)| format!("[ {}, %{} ]", v, lbl))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.emit_line(&format!("  {} = phi {} {}", phi, result_ty, phi_args));
+                    Some(phi)
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -1115,6 +1255,45 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn tc_struct_field_access() {
+        // struct Point { x: i32, y: i32 }
+        // fn main() -> i32 { let p = Point { x: 10, y: 32 }; return p.x + p.y; }
+        let src = r#"
+struct Point { x: i32, y: i32 }
+fn main() -> i32 {
+    let p = Point { x: 10, y: 32 };
+    let a = p.x;
+    let b = p.y;
+    return a + b;
+}
+"#;
+        let ir = emit_src(src);
+        println!("STRUCT IR:\n{}", ir);
+        // Must contain GEP for field 0 and field 1
+        assert!(ir.contains("getelementptr inbounds %struct.Point"), "missing struct GEP");
+        assert!(ir.contains("%struct.Point = type { i32, i32 }"), "missing struct type decl");
+    }
+
+    #[test]
+    fn tc_match_int() {
+        // fn classify(n: i32) -> i32 { match n { 0 => 10, 1 => 20, _ => 99 } }
+        let src = r#"
+fn classify(n: i32) -> i32 {
+    match n {
+        0 => 10,
+        1 => 20,
+        _ => 99,
+    }
+}
+fn main() -> i32 { return 0; }
+"#;
+        let ir = emit_src(src);
+        println!("MATCH IR:\n{}", ir);
+        assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
+        assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
     fn tc_p11_m3_no_panic_on_named_ty() {
         // Compiler must not panic when AxonVec appears in type position
         let ir = emit_src("fn f() -> i32 { return 0; }");
