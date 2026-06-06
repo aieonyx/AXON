@@ -12,11 +12,11 @@ members = [
     "axon_verify_core",
     "axon_lexer",
     "axon_parser",
-    "axon_codegen",
+# REMOVED(p13-m1):     "axon_codegen",
     "axon_rt",
     "axon_std",
-    "axon_llvm",
-    "axon_ai",
+# REMOVED(p13-m1):     "axon_llvm",
+# REMOVED(p13-m1):     "axon_ai",
     "axon_cli",
 ]
 
@@ -25,11 +25,11 @@ members = [
 axon_core    = { path = "axon_core"    }
     axon_lexer   = { path = "axon_lexer"   }
 axon_parser  = { path = "axon_parser"  }
-axon_codegen = { path = "axon_codegen" }
+# REMOVED(p13-m1): axon_codegen = { path = "axon_codegen" }
 axon_rt      = { path = "axon_rt"      }
 axon_std     = { path = "axon_std"     }
-axon_llvm    = { path = "axon_llvm"    }
-axon_ai     = { path = "axon_ai"      }
+# REMOVED(p13-m1): axon_llvm    = { path = "axon_llvm"    }
+# REMOVED(p13-m1): axon_ai     = { path = "axon_ai"      }
 
 [workspace.metadata]
 description = "AXON — AI-Native Programming Language"
