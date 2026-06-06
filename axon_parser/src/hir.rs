@@ -1190,6 +1190,56 @@ mod tests {
         lower(items)
     }
 
+    // ── Phase 15 M1 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_cap_annotation_network() {
+        // #[cap(network)] must populate required_caps with "network"
+        let m = lower_src("#[cap(network)] fn send_data(x: i32) -> i32 { return x; }");
+        assert_eq!(m.errors.len(), 0);
+        let f = match &m.items[0] { HirItem::Fn(f) => f, _ => panic!("expected fn") };
+        assert!(
+            f.required_caps.iter().any(|c| c == "network"),
+            "#[cap(network)] must appear in required_caps, got: {:?}", f.required_caps
+        );
+    }
+
+    #[test]
+    fn tc_cap_annotation_filesystem() {
+        // #[cap(filesystem)] must populate required_caps with "filesystem"
+        let m = lower_src("#[cap(filesystem)] fn read_file(x: i32) -> i32 { return x; }");
+        assert_eq!(m.errors.len(), 0);
+        let f = match &m.items[0] { HirItem::Fn(f) => f, _ => panic!("expected fn") };
+        assert!(
+            f.required_caps.iter().any(|c| c == "filesystem"),
+            "#[cap(filesystem)] must appear in required_caps, got: {:?}", f.required_caps
+        );
+    }
+
+    #[test]
+    fn tc_cap_annotation_multiple() {
+        // Multiple caps on one fn must all appear in required_caps
+        let m = lower_src("#[cap(network)] #[cap(filesystem)] fn dual(x: i32) -> i32 { return x; }");
+        assert_eq!(m.errors.len(), 0);
+        let f = match &m.items[0] { HirItem::Fn(f) => f, _ => panic!("expected fn") };
+        assert!(f.required_caps.iter().any(|c| c == "network"),
+            "network missing, got: {:?}", f.required_caps);
+        assert!(f.required_caps.iter().any(|c| c == "filesystem"),
+            "filesystem missing, got: {:?}", f.required_caps);
+    }
+
+    #[test]
+    fn tc_cap_annotation_unannotated_fn_has_no_explicit_cap() {
+        // A plain fn with no #[cap] must not get network or filesystem caps
+        let m = lower_src("fn pure_math(x: i32) -> i32 { return x; }");
+        assert_eq!(m.errors.len(), 0);
+        let f = match &m.items[0] { HirItem::Fn(f) => f, _ => panic!("expected fn") };
+        assert!(!f.required_caps.iter().any(|c| c == "network"),
+            "unannotated fn must not get network, got: {:?}", f.required_caps);
+        assert!(!f.required_caps.iter().any(|c| c == "filesystem"),
+            "unannotated fn must not get filesystem, got: {:?}", f.required_caps);
+    }
+
     #[test]
     fn th1_lower_simple_fn() {
         let m = lower_src("fn add(x: i32, y: i32) -> i32 { return x; }");
