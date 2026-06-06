@@ -150,6 +150,10 @@ impl LlvmEmitter {
         self.emit_line("declare %AxonIterResult @axon_iter_next(ptr)");
         // P13-M4-DECLARE-DROP
         self.emit_line("declare void @axon_iter_drop(ptr)");
+        // P20-M2: seL4 IPC intrinsic declarations
+        self.emit_line("declare i64 @axon_ipc_call(i64, i64, ...)");
+        self.emit_line("declare i64 @axon_ipc_send(i64, i64, ...)");
+        self.emit_line("declare i64 @axon_ipc_recv(i64, ...)");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -436,6 +440,28 @@ impl LlvmEmitter {
                     ));
                     return None;
                 }
+                // P20-M2: seL4 IPC intrinsics — gated by ipc_send / ipc_receive cap
+                // seL4 IPC ABI: endpoint (i64), msginfo (i64), msg words (i64...) → i64
+                let ipc_intrinsic = match fn_name.as_str() {
+                    "axon_ipc_call"  => Some("axon_ipc_call"),
+                    "axon_ipc_send"  => Some("axon_ipc_send"),
+                    "axon_ipc_recv"  => Some("axon_ipc_recv"),
+                    _ => None,
+                };
+                if let Some(ipc_fn) = ipc_intrinsic {
+                    let arg_strs: Vec<String> = args.iter()
+                        .filter_map(|a| {
+                            let v = self.emit_expr(a)?;
+                            Some(format!("i64 {}", v))
+                        })
+                        .collect();
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!(
+                        "  {} = call i64 @{}({})", tmp, ipc_fn, arg_strs.join(", ")
+                    ));
+                    return Some(tmp);
+                }
+
                 let mut arg_strs = Vec::new();
                 for arg in args {
                     if let Some(v) = self.emit_expr(arg) {
@@ -1468,6 +1494,44 @@ fn main() -> i32 { return 0; }
         println!("MATCH IR:\n{}", ir);
         assert!(ir.contains("icmp eq i32"), "missing icmp for match arms");
         assert!(ir.contains("phi i32"), "missing phi merge for match");
+    }
+
+    // ── Phase 20 M2 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_ipc_call_emits_ir() {
+        let src = r#"fn send(ep: i64, msg: i64) -> i64 { return axon_ipc_call(ep, msg); }"#;
+        let ir = emit_src(src);
+        assert!(ir.contains("@axon_ipc_call"),
+            "IR must contain @axon_ipc_call, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_ipc_send_emits_ir() {
+        let src = r#"fn do_send(ep: i64, msg: i64) -> i64 { return axon_ipc_send(ep, msg); }"#;
+        let ir = emit_src(src);
+        assert!(ir.contains("@axon_ipc_send"),
+            "IR must contain @axon_ipc_send, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_ipc_recv_emits_ir() {
+        let src = r#"fn do_recv(ep: i64) -> i64 { return axon_ipc_recv(ep); }"#;
+        let ir = emit_src(src);
+        assert!(ir.contains("@axon_ipc_recv"),
+            "IR must contain @axon_ipc_recv, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tc_ipc_declarations_in_module_ir() {
+        let src = "fn f(x: i32) -> i32 { return x; }";
+        let ir = emit_src(src);
+        assert!(ir.contains("declare i64 @axon_ipc_call"),
+            "module IR must declare axon_ipc_call, got:\n{}", ir);
+        assert!(ir.contains("declare i64 @axon_ipc_send"),
+            "module IR must declare axon_ipc_send, got:\n{}", ir);
+        assert!(ir.contains("declare i64 @axon_ipc_recv"),
+            "module IR must declare axon_ipc_recv, got:\n{}", ir);
     }
 
     // ── Phase 17 M4 ──────────────────────────────────────────────────────────
