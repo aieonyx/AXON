@@ -1464,6 +1464,42 @@ fn main() -> i32 { return 0; }
         assert!(ir.contains("phi i32"), "missing phi merge for match");
     }
 
+    // ── Phase 17 M4 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn tc_p17_integration() {
+        // Full program: generic fn called with two concrete types.
+        // MonoTable stamps id_i32 and id_bool — both appear in IR.
+        // Generic original is NOT emitted as a concrete symbol.
+        use crate::mono::MonoTable;
+        use crate::hir::{lower, HirTy};
+        use crate::parser::parse;
+        let src = r#"
+            fn id<T>(x: T) -> T { return x; }
+            fn use_id(a: i32, b: i32) -> i32 { return a; }
+        "#;
+        let items = parse(src).expect("parse failed");
+        let module = lower(items);
+        let table = MonoTable::collect(&module);
+        // Emit module normally (generic fn skipped by emit_item _ => {})
+        let mut emitter = LlvmEmitter::new();
+        let base_ir = emitter.emit_module(&module);
+        // Emit two concrete instantiations
+        emitter.emit_mono(&table, &[
+            ("id", vec![("T", HirTy::I32)]),
+            ("id", vec![("T", HirTy::Bool)]),
+        ]);
+        let full_ir = emitter.output.clone();
+        // Both concrete copies present
+        assert!(full_ir.contains("@id_i32"),
+            "IR must contain @id_i32, got:\n{}", full_ir);
+        assert!(full_ir.contains("@id_bool"),
+            "IR must contain @id_bool, got:\n{}", full_ir);
+        // Non-generic fn still emitted
+        assert!(base_ir.contains("@use_id"),
+            "IR must contain @use_id, got:\n{}", base_ir);
+    }
+
     // ── Phase 17 M3 ──────────────────────────────────────────────────────────
 
     #[test]

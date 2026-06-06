@@ -170,7 +170,7 @@ impl MonoTable {
         // Mangled name: fn_name_T1_T2 e.g. id_i32
         let suffix: Vec<String> = template.generics.iter()
             .map(|g| {
-                map.get(g).map(|ty| llvm_ty_name(ty)).unwrap_or_else(|| g.clone())
+                map.get(g).map(llvm_ty_name).unwrap_or_else(|| g.clone())
             })
             .collect();
         let mangled_name = format!("{}_{}", fn_name, suffix.join("_"));
