@@ -471,6 +471,7 @@ fn collect_places_rec(
     }
 }
 
+#[allow(clippy::new_without_default)]
 impl HirLowerer {
     pub fn new() -> Self {
         HirLowerer {
