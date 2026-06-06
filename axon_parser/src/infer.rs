@@ -578,6 +578,13 @@ impl ConstraintGen {
                         _      => self.fresh_var(),
                     };
                 }
+                // P12-M2: Range method resolution
+                if matches!(&recv_ty, InfTy::Named(n, _) if n == "Range") {
+                    return match method.as_str() {
+                        "next" => InfTy::Named("Option".into(), vec![InfTy::I64]),
+                        _      => self.fresh_var(),
+                    };
+                }
                 // P11-M2: slice method return types
                 if matches!(recv_ty, InfTy::Slice(_)) {
                     return match method.as_str() {
@@ -617,6 +624,14 @@ impl ConstraintGen {
                     self.emit(tt.clone(), et, ConstraintOrigin::IfBranch);
                 }
                 tt
+            }
+            // P12-M2: Range expression infers as AxonIterator<i64>
+            HirExprKind::Range(start, end, _inclusive) => {
+                let st = self.generate_expr(start);
+                let en = self.generate_expr(end);
+                self.emit(st, InfTy::I64, ConstraintOrigin::Explicit);
+                self.emit(en, InfTy::I64, ConstraintOrigin::Explicit);
+                InfTy::Named("AxonIterator".into(), vec![InfTy::I64])
             }
             HirExprKind::While(cond, body) => {
                 let ct = self.generate_expr(cond);
@@ -902,3 +917,5 @@ mod tests {
 }
 
 // P12-M1-APPLIED
+
+// P12-M2-APPLIED

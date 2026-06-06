@@ -324,6 +324,9 @@ declare void @axon_println(ptr)\n\
 declare void @axon_print_int(i64)\n\
 ; P12-M1: iterator protocol\n\
 declare ptr @axon_iter_next(ptr)\n\
+; P12-M2: range protocol\n\
+declare ptr @axon_range_new(i64, i64)\n\
+declare ptr @axon_range_next(ptr)\n\
 ; === end stdlib ===\n"
 }
 
@@ -519,3 +522,5 @@ mod tests {
 }
 
 // P12-M1-APPLIED
+
+// P12-M2-APPLIED
