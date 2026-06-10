@@ -28,6 +28,7 @@ pub enum TokenKind {
     Extern,
     Sovereign, Capability, Profile, Patchable,
     Requires, Ensures, Invariant, Ghost, Pure, UnsafeAxon,
+    Asm,
     AtRequires, AtEnsures, AtInvariant,
     IntLit(u64), FloatLit(f64), StringLit(String), CharLit(char), BoolLit(bool),
     Ident(String), Lifetime(String),
@@ -276,6 +277,7 @@ fn kw_or_ident(word: &str) -> TokenKind {
         "requires"=>TokenKind::Requires,"ensures"=>TokenKind::Ensures,
         "invariant"=>TokenKind::Invariant,"ghost"=>TokenKind::Ghost,
         "pure"=>TokenKind::Pure,"unsafe_axon"=>TokenKind::UnsafeAxon,
+        "asm"=>TokenKind::Asm,
         _=>TokenKind::Ident(word.to_string()),
     }
 }

@@ -140,6 +140,8 @@ pub enum HirTy {
     Unit,
     Dyn(String),
     CStr,                                        // P21-M2: null-terminated C string pointer
+    /// P23-M2: atomic primitive — maps to LLVM atomic i64 ops
+    AtomicU64,
     /// P20-M1: seL4 sovereign IPC types — no heap, no libc
     SeL4Endpoint,   // capability slot referencing an IPC endpoint
     SeL4Badge,      // badge value carried on IPC (u64)
@@ -167,7 +169,7 @@ impl HirTy {
             HirTy::Unit | HirTy::Ref(false, _, _) |
             HirTy::Infer | HirTy::Param(_) |
             HirTy::SeL4Endpoint | HirTy::SeL4Badge | HirTy::SeL4MsgInfo |
-            HirTy::CStr
+            HirTy::CStr | HirTy::AtomicU64
         )
     }
     pub fn is_ref(&self) -> bool { matches!(self, HirTy::Ref(_, _, _)) }
@@ -224,6 +226,16 @@ pub enum HirExprKind {
     Drop(PlaceId),
     // Borrow expiry — inserted at StorageDead
     BorrowExpires(BorrowId),
+    // P23-M1: inline assembly block
+    // template: raw asm string, outputs/inputs: (constraint, place/expr),
+    // clobbers: register names, volatile: side-effect fence
+    AsmBlock {
+        template: String,
+        outputs: Vec<(String, PlaceId)>,
+        inputs:  Vec<(String, Box<HirExpr>)>,
+        clobbers: Vec<String>,
+        volatile: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -814,6 +826,8 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
                     "()"    => HirTy::Unit,
                     // P20-M1: seL4 sovereign IPC types
                     "CStr" | "c_str" => HirTy::CStr,
+                    // P23-M2: atomic primitive
+                    "AtomicU64" => HirTy::AtomicU64,
                     "sel4_endpoint" => HirTy::SeL4Endpoint,
                     "sel4_badge"    => HirTy::SeL4Badge,
                     "sel4_msginfo"  => HirTy::SeL4MsgInfo,
@@ -1039,6 +1053,19 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
             Expr::Try(inner, _) => {
                 HirExprKind::Try(Box::new(self.lower_expr(*inner)))
             }
+            // P23-M1: lower asm! block to HirExprKind::AsmBlock
+            Expr::AsmBlock { template, outputs, inputs, clobbers, volatile, .. } => {
+                let hir_outputs = outputs.into_iter().map(|(c, e)| {
+                    let place = if let Expr::Ident(ref id) = *e {
+                        self.lookup_name(&id.name).unwrap_or_else(|| self.fresh_place())
+                    } else { self.fresh_place() };
+                    (c, place)
+                }).collect();
+                let hir_inputs = inputs.into_iter().map(|(c, e)| {
+                    (c, Box::new(self.lower_expr(*e)))
+                }).collect();
+                HirExprKind::AsmBlock { template, outputs: hir_outputs, inputs: hir_inputs, clobbers, volatile }
+            }
             #[allow(unreachable_patterns)]
             _ => HirExprKind::Lit(HirLit::Unit),
         };
@@ -1198,6 +1225,8 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
             | Expr::Path(_, s) => s.clone(),
             Expr::Ident(i) => i.span.clone(),
             Expr::Closure(_, _, sp) => sp.clone(),
+            // P23-M1: asm! span
+            Expr::AsmBlock { span, .. } => span.clone(),
         }
     }
 }

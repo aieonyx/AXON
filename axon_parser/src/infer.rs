@@ -113,6 +113,8 @@ pub fn hir_to_inf(ty: &HirTy) -> InfTy {
         HirTy::Dyn(n)       => InfTy::Named(n.clone(), vec![]),
         // P20-M1: seL4 types map to U64 in the inference engine
         HirTy::SeL4Endpoint | HirTy::SeL4Badge | HirTy::SeL4MsgInfo => InfTy::U64, // dyn Trait → opaque named type
+        // P23-M2: AtomicU64 infers as U64
+        HirTy::AtomicU64 => InfTy::U64,
         HirTy::Infer        => InfTy::Var(TyVar(u32::MAX)), // placeholder; replaced by fresh var
         HirTy::Error        => InfTy::Error("error".into()),
     }
@@ -733,7 +735,9 @@ impl ConstraintGen {
             }
             HirExprKind::Path(_) => self.fresh_var(),
             HirExprKind::Drop(_) | HirExprKind::BorrowExpires(_) => InfTy::Unit,
-            HirExprKind::Closure(_, _, _) => InfTy::Unit, // P14-M3: closure type inference deferred
+            HirExprKind::Closure(_, _, _) => InfTy::Unit,
+            // P23-M1: asm! block always yields unit
+            HirExprKind::AsmBlock { .. } => InfTy::Unit, // P14-M3: closure type inference deferred
         }
     }
 
