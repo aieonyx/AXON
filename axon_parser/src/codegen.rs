@@ -44,6 +44,8 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::SeL4MsgInfo  => "i64",
         HirTy::Never  => "void",
         HirTy::Str    => "ptr",
+        // P26-M1: raw pointer — opaque ptr in LLVM 18
+        HirTy::Ptr(_, _) => "ptr",
         HirTy::Slice(_) => "ptr",   // fat pointer alloca passed as ptr
         HirTy::String  => "ptr",   // heap String — opaque ptr (LLVM 18)
         // CF5: Infer is a type hole from HIR lowerer.
@@ -549,6 +551,45 @@ impl LlvmEmitter {
                     ));
                     return Some(tmp);
                 }
+                // P26-M1: volatile memory intrinsics — MMIO access
+                if fn_name == "read_volatile" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let ptr_i64 = av.first().cloned().unwrap_or_default();
+                    let ptr_cast = self.ssa.fresh_tmp();
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = inttoptr i64 {} to ptr", ptr_cast, ptr_i64));
+                    self.emit_line(&format!("  {} = load volatile i64, ptr {}, align 8", tmp, ptr_cast));
+                    return Some(tmp);
+                }
+                if fn_name == "write_volatile" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let ptr_i64 = av.first().cloned().unwrap_or_default();
+                    let val    = av.get(1).cloned().unwrap_or_else(|| "0".to_string());
+                    let ptr_cast = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = inttoptr i64 {} to ptr", ptr_cast, ptr_i64));
+                    self.emit_line(&format!("  store volatile i64 {}, ptr {}, align 8", val, ptr_cast));
+                    return None;
+                }
+                // P26-M1: slice_from_raw_parts(ptr, len) → fat pointer { ptr, i64 }
+                if fn_name == "slice_from_raw_parts" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let ptr_i64 = av.first().cloned().unwrap_or_default();
+                    let len    = av.get(1).cloned().unwrap_or_else(|| "0".to_string());
+                    let fat    = self.ssa.fresh_tmp();
+                    let ptr_cast = self.ssa.fresh_tmp();
+                    let gep0   = self.ssa.fresh_tmp();
+                    let gep1   = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = inttoptr i64 {} to ptr", ptr_cast, ptr_i64));
+                    self.emit_line(&format!("  {} = alloca {{ ptr, i64 }}", fat));
+                    self.emit_line(&format!("  {} = getelementptr inbounds {{ ptr, i64 }}, ptr {}, i32 0, i32 0", gep0, fat));
+                    self.emit_line(&format!("  store ptr {}, ptr {}", ptr_cast, gep0));
+                    self.emit_line(&format!("  {} = getelementptr inbounds {{ ptr, i64 }}, ptr {}, i32 0, i32 1", gep1, fat));
+                    self.emit_line(&format!("  store i64 {}, ptr {}", len, gep1));
+                    return Some(fat);
+                }
                 // P25-M1: memory builtins — emit LLVM intrinsics directly
                 if fn_name == "memset" {
                     let mut av: Vec<String> = Vec::new();
@@ -772,6 +813,95 @@ impl LlvmEmitter {
                                 return Some(tmp);
                             }
                         }
+                    }
+                }
+                // P26-M1: raw pointer method dispatch
+                // ptr.add/offset → getelementptr i8, ptr.read/write → load/store
+                if matches!(recv.ty, HirTy::Ptr(_, _)) {
+                    let base_val = self.emit_expr(recv);
+                    match method.as_str() {
+                        "add" | "offset" => {
+                            if let Some(base) = base_val {
+                                if let Some(off) = args.first().and_then(|a| self.emit_expr(a)) {
+                                    let tmp = self.ssa.fresh_tmp();
+                                    self.emit_line(&format!(
+                                        "  {} = getelementptr inbounds i8, ptr {}, i64 {}",
+                                        tmp, base, off
+                                    ));
+                                    return Some(tmp);
+                                }
+                            }
+                            return None;
+                        }
+                        "read" => {
+                            if let Some(base) = base_val {
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = load i64, ptr {}, align 8", tmp, base));
+                                return Some(tmp);
+                            }
+                            return None;
+                        }
+                        "write" => {
+                            if let Some(base) = base_val {
+                                if let Some(val) = args.first().and_then(|a| self.emit_expr(a)) {
+                                    self.emit_line(&format!("  store i64 {}, ptr {}, align 8", val, base));
+                                }
+                            }
+                            return None;
+                        }
+                        _ => { return None; }
+                    }
+                }
+                // P23-M2: AtomicU64 method dispatch
+                if matches!(recv.ty, HirTy::AtomicU64) {
+                    let ptr_val = self.emit_expr(recv);
+                    match method.as_str() {
+                        "load" => {
+                            let ptr_val = ptr_val?;
+                            let tmp = self.ssa.fresh_tmp();
+                            self.emit_line(&format!("  {} = load atomic i64, ptr {} seq_cst, align 8", tmp, ptr_val));
+                            return Some(tmp);
+                        }
+                        "store" => {
+                            if let Some(val) = args.first() {
+                                let p = ptr_val?;
+                                let v = self.emit_expr(val)?;
+                                self.emit_line(&format!("  store atomic i64 {}, ptr {} seq_cst, align 8", v, p));
+                            }
+                            return None;
+                        }
+                        "fetch_add" => {
+                            if let Some(val) = args.first() {
+                                let p = ptr_val?;
+                                let v = self.emit_expr(val)?;
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = atomicrmw add ptr {}, i64 {} seq_cst", tmp, p, v));
+                                return Some(tmp);
+                            }
+                            return None;
+                        }
+                        "fetch_sub" => {
+                            if let Some(val) = args.first() {
+                                let p = ptr_val?;
+                                let v = self.emit_expr(val)?;
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = atomicrmw sub ptr {}, i64 {} seq_cst", tmp, p, v));
+                                return Some(tmp);
+                            }
+                            return None;
+                        }
+                        "compare_exchange" => {
+                            if args.len() >= 2 {
+                                let p = ptr_val?;
+                                let expected = self.emit_expr(&args[0])?;
+                                let desired  = self.emit_expr(&args[1])?;
+                                let tmp = self.ssa.fresh_tmp();
+                                self.emit_line(&format!("  {} = cmpxchg ptr {}, i64 {}, i64 {} seq_cst seq_cst", tmp, p, expected, desired));
+                                return Some(tmp);
+                            }
+                            return None;
+                        }
+                        _ => { return None; }
                     }
                 }
                 // Generic method call — evaluate receiver and args, return fresh tmp
