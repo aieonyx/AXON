@@ -1806,3 +1806,96 @@ mod p26_rawptr_tests {
     }
 }
 
+#[cfg(test)]
+mod p27_notification_tests {
+    use super::*;
+    use crate::hir::lower;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        crate::codegen::emit_ir(&hir)
+    }
+
+    fn get_hir_fn(src: &str) -> crate::hir::HirFn {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        hir.items.into_iter().find_map(|i| {
+            if let crate::hir::HirItem::Fn(f) = i { Some(f) } else { None }
+        }).expect("fn not found")
+    }
+
+    #[test]
+    fn tp27_01_notification_handler_hir() {
+        let f = get_hir_fn(r#"#[notification_handler] fn on_event(ep: u64) {}"#);
+        assert!(f.is_notification_handler, "is_notification_handler must be true");
+    }
+
+    #[test]
+    fn tp27_02_notification_handler_symbol() {
+        let ir = compile_to_ir(r#"#[notification_handler] fn on_event(ep: u64) {}"#);
+        assert!(ir.contains("@axon_notification_handler_on_event"),
+            "notification_handler must emit correct symbol, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp27_03_notification_handler_external_linkage() {
+        let ir = compile_to_ir(r#"#[notification_handler] fn on_event(ep: u64) {}"#);
+        assert!(!ir.contains("internal"),
+            "notification_handler must have external linkage, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp27_04_sel4_wait_emits_svc7() {
+        let ir = compile_to_ir("fn f(ep: u64) -> u64 { return sel4_wait(ep); }");
+        assert!(ir.contains("mov x7, #7"), "sel4_wait must use syscall #7, got:
+{}", ir);
+        assert!(ir.contains("svc #0"), "sel4_wait must emit SVC #0");
+        assert!(ir.contains("sideeffect"), "sel4_wait must be sideeffect");
+    }
+
+    #[test]
+    fn tp27_05_sel4_notify_emits_svc6_void() {
+        let ir = compile_to_ir("fn f(ep: u64) { sel4_notify(ep); }");
+        assert!(ir.contains("mov x7, #6"), "sel4_notify must use syscall #6, got:
+{}", ir);
+        assert!(ir.contains("call void asm"), "sel4_notify must be void return");
+        assert!(ir.contains("sideeffect"), "sel4_notify must be sideeffect");
+    }
+
+    #[test]
+    fn tp27_06_sel4_poll_emits_svc8() {
+        let ir = compile_to_ir("fn f(ep: u64) -> u64 { return sel4_poll(ep); }");
+        assert!(ir.contains("mov x7, #8"), "sel4_poll must use syscall #8, got:
+{}", ir);
+        assert!(ir.contains("svc #0"), "sel4_poll must emit SVC #0");
+        assert!(ir.contains("call i64 asm"), "sel4_poll must return i64");
+    }
+
+    #[test]
+    fn tp27_07_full_event_driven_pd() {
+        // Full event-driven PD pattern: notification_handler + sel4_wait loop
+        let ir = compile_to_ir(r#"
+            #[notification_handler]
+            #[no_mangle]
+            #[link_section = ".text.notify"]
+            fn on_irq(ep: u64) {
+                let badge: u64 = sel4_wait(ep);
+                sel4_notify(ep);
+            }
+        "#);
+        assert!(ir.contains("@axon_notification_handler_on_irq"),
+            "PD notification handler symbol must be present");
+        assert!(ir.contains(".text.notify"), "must be in .text.notify section");
+        assert!(ir.contains("mov x7, #7"), "must wait for notification");
+        assert!(ir.contains("mov x7, #6"), "must notify after handling");
+        assert!(ir.contains("~{memory}"), "seL4 ops must clobber memory");
+    }
+}
+

@@ -281,14 +281,19 @@ impl LlvmEmitter {
         // P19-QA: non-pub fns get internal linkage (LLVM IPO + tc5 fix)
         // Exception: main must always be external (linker entry point)
         let linkage = if f.is_pub || f.name == "main" { "" } else { "internal " };
-        // P25-M1: #[panic_handler] — emit as sovereign axon_panic_handler symbol
-        // Always external + no_mangle so the linker can find it as the panic entry
-        let linkage = if f.is_panic_handler { "" } else { linkage };
-        let fn_name = if f.is_panic_handler {
+        // P27-M1: #[notification_handler] — emit as axon_notification_handler_<name>
+        // External linkage so seL4 runtime can locate notification entry points
+        let linkage = if f.is_notification_handler { "" } else { linkage };
+        let fn_name = if f.is_notification_handler {
+            format!("axon_notification_handler_{}", f.name)
+        } else if f.is_panic_handler {
+            // P25-M1: #[panic_handler] — emit as sovereign axon_panic_handler symbol
             "axon_panic_handler".to_string()
         } else {
             f.name.clone()
         };
+        // P25-M1: #[panic_handler] — ensure external linkage
+        let linkage = if f.is_panic_handler { "" } else { linkage };
         // P24-M1: #[no_mangle] forces external linkage regardless of is_pub
         let linkage = if f.no_mangle { "" } else { linkage };
         // P24-M1: #[link_section] appends section attribute to define
@@ -509,6 +514,45 @@ impl LlvmEmitter {
                     "axon_ipc_recv"  => Some("axon_ipc_recv"),
                     _ => None,
                 };
+                // P27-M1: seL4 notification intrinsics
+                // seL4_Wait(ep) — blocking wait, returns badge in x0
+                if fn_name == "sel4_wait" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let ep = av.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let tmp = self.ssa.fresh_tmp();
+                    // seL4_SysWait=7 — blocks until notification arrives, badge in x0
+                    self.emit_line(&format!(
+                        "  {} = call i64 asm sideeffect \"mov x7, #7; svc #0\", \"{{{}}},r,~{{x7}},~{{memory}}\"(i64 {})",
+                        tmp, "={x0}", ep
+                    ));
+                    return Some(tmp);
+                }
+                // seL4_Notify(ep) — send notification signal (non-blocking)
+                if fn_name == "sel4_notify" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let ep = av.first().cloned().unwrap_or_else(|| "0".to_string());
+                    // seL4_SysNBSend=6 to notification object
+                    self.emit_line(&format!(
+                        "  call void asm sideeffect \"mov x7, #6; svc #0\", \"r,~{{x7}},~{{memory}}\"(i64 {})",
+                        ep
+                    ));
+                    return None;
+                }
+                // seL4_Poll(ep) — non-blocking notification check, returns badge or 0
+                if fn_name == "sel4_poll" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let ep = av.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let tmp = self.ssa.fresh_tmp();
+                    // seL4_SysNBWait=8 — non-blocking poll
+                    self.emit_line(&format!(
+                        "  {} = call i64 asm sideeffect \"mov x7, #8; svc #0\", \"{{{}}},r,~{{x7}},~{{memory}}\"(i64 {})",
+                        tmp, "={x0}", ep
+                    ));
+                    return Some(tmp);
+                }
                 // P23-M4: sovereign seL4 syscall intrinsics — pure AXON asm!, zero C glue
                 // seL4 aarch64 ABI: syscall# in x7, args in x0-x6, return in x0, SVC #0
                 // sel4_call(ep: u64, msginfo: u64) -> u64
