@@ -160,6 +160,10 @@ impl LlvmEmitter {
         self.emit_line("declare i64 @axon_ipc_recv(i64, ...)");
         // P22-M2: axon_verify_core postcondition check stub
         self.emit_line("declare void @axon_ensures_check(i32, i1)");
+        // P25-M1: LLVM memory builtins + trap for panic=abort
+        self.emit_line("declare void @llvm.memset.p0.i64(ptr nocapture writeonly, i8, i64, i1)");
+        self.emit_line("declare void @llvm.memcpy.p0.p0.i64(ptr nocapture writeonly, ptr nocapture readonly, i64, i1)");
+        self.emit_line("declare void @llvm.trap()");
         self.emit_blank();
         self.emit_line("!llvm.module.flags = !{!0}");
         self.emit_line("!0 = !{i32 1, !\"axon_sovereign\", i32 1}");
@@ -275,6 +279,14 @@ impl LlvmEmitter {
         // P19-QA: non-pub fns get internal linkage (LLVM IPO + tc5 fix)
         // Exception: main must always be external (linker entry point)
         let linkage = if f.is_pub || f.name == "main" { "" } else { "internal " };
+        // P25-M1: #[panic_handler] — emit as sovereign axon_panic_handler symbol
+        // Always external + no_mangle so the linker can find it as the panic entry
+        let linkage = if f.is_panic_handler { "" } else { linkage };
+        let fn_name = if f.is_panic_handler {
+            "axon_panic_handler".to_string()
+        } else {
+            f.name.clone()
+        };
         // P24-M1: #[no_mangle] forces external linkage regardless of is_pub
         let linkage = if f.no_mangle { "" } else { linkage };
         // P24-M1: #[link_section] appends section attribute to define
@@ -290,9 +302,9 @@ impl LlvmEmitter {
             String::new()
         };
         if matches!(f.ret, HirTy::Unit | HirTy::Never) {
-            self.emit_line(&format!("define {}void @{}({}){}{}  {{", linkage, f.name, params.join(", "), section_attr, stack_attr));
+            self.emit_line(&format!("define {}void @{}({}){}{}  {{", linkage, fn_name, params.join(", "), section_attr, stack_attr));
         } else {
-            self.emit_line(&format!("define {}{} @{}({}){}{}  {{", linkage, ret_ty, f.name, params.join(", "), section_attr, stack_attr));
+            self.emit_line(&format!("define {}{} @{}({}){}{}  {{", linkage, ret_ty, fn_name, params.join(", "), section_attr, stack_attr));
         }
         self.emit_line("entry:");
         self.param_allocas.clear();
@@ -536,6 +548,31 @@ impl LlvmEmitter {
                         tmp, "={x0}", ep
                     ));
                     return Some(tmp);
+                }
+                // P25-M1: memory builtins — emit LLVM intrinsics directly
+                if fn_name == "memset" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let ptr = av.first().cloned().unwrap_or_default();
+                    let val = av.get(1).cloned().unwrap_or_else(|| "0".to_string());
+                    let len = av.get(2).cloned().unwrap_or_else(|| "0".to_string());
+                    self.emit_line(&format!("  call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)", ptr, val, len));
+                    return None;
+                }
+                if fn_name == "memcpy" {
+                    let mut av: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
+                    let dst = av.first().cloned().unwrap_or_default();
+                    let src = av.get(1).cloned().unwrap_or_default();
+                    let len = av.get(2).cloned().unwrap_or_else(|| "0".to_string());
+                    self.emit_line(&format!("  call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)", dst, src, len));
+                    return None;
+                }
+                // P25-M1: axon_abort() — panic=abort equivalent, emits llvm.trap
+                if fn_name == "axon_abort" {
+                    self.emit_line("  call void @llvm.trap()");
+                    self.emit_line("  unreachable");
+                    return None;
                 }
                 // P23-M2: memory fence intrinsics
                 if fn_name == "fence" {

@@ -305,6 +305,8 @@ pub struct HirFn {
     /// Capabilities explicitly required by @cap(capability_name) annotations.
     /// Checked against the active profile at compile time.
     pub required_caps: Vec<String>,
+    /// P25-M1: #[panic_handler] — this fn is the sovereign panic handler
+    pub is_panic_handler: bool,
     /// P24-M1: #[no_mangle] — emit function name without mangling
     pub no_mangle: bool,
     /// P24-M1: #[link_section = "..."] — place function in named ELF section
@@ -811,6 +813,8 @@ fn hir_expr_contains_index(expr: &HirExpr) -> bool {
             is_ghost: sig.is_ghost,
             span: sig.span,
             required_caps,
+            // P25-M1: extract panic handler attr
+            is_panic_handler: sig.attrs.iter().any(|a| a.name == "panic_handler"),
             // P24-M1: extract linker control attrs
             no_mangle: sig.attrs.iter().any(|a| a.name == "no_mangle"),
             link_section: sig.attrs.iter()
