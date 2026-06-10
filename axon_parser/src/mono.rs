@@ -191,6 +191,8 @@ impl MonoTable {
             is_ghost: template.is_ghost,
             span: template.span.clone(),
             required_caps: template.required_caps.clone(),
+            // P27-M1: propagate notification handler through monomorphization
+            is_notification_handler: template.is_notification_handler,
             // P25-M1: propagate panic handler through monomorphization
             is_panic_handler: template.is_panic_handler,
             // P24-M1: propagate linker control attrs through monomorphization
