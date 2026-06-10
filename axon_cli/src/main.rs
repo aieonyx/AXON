@@ -90,6 +90,7 @@ fn cmd_check(args: &[String]) {
 
 fn cmd_build(args: &[String]) {
     use axon_parser::profile::{Profile, check_profile, enforce_profile};
+    use axon_parser::axon_manifest::parse_manifest;
     use axon_parser::parser::parse;
     use axon_parser::hir::lower;
     use axon_parser::codegen::{emit_ir, ir_to_object, object_to_binary, ir_to_ptx, ir_to_sel4, sel4_abi_check};
@@ -120,13 +121,33 @@ fn cmd_build(args: &[String]) {
         }
     }
 
-    let file = match file_arg {
-        Some(f) => f,
-        None => {
-            eprintln!("Usage: axon build [--profile <p>] [-o <out>] <file.axon>");
-            std::process::exit(1);
+    // P28: auto-detect axon.toml if no file arg given
+    let (file, manifest_profile, manifest_target) = if file_arg.is_none() && std::path::Path::new("axon.toml").exists() {
+        let toml_src = std::fs::read_to_string("axon.toml").unwrap_or_default();
+        match parse_manifest(&toml_src) {
+            Ok(m) => {
+                println!("axon build: using axon.toml [{}]", m.name);
+                let mp = if profile_str.is_none() { Some(m.profile.clone()) } else { None };
+                let mt = if target.is_none() { Some(m.target.clone()) } else { None };
+                (m.entry, mp, mt)
+            }
+            Err(e) => {
+                eprintln!("axon: axon.toml error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        match file_arg {
+            Some(f) => (f, None, None),
+            None => {
+                eprintln!("Usage: axon build [--profile <p>] [-o <out>] <file.axon>");
+                std::process::exit(1);
+            }
         }
     };
+    // Apply manifest defaults if not overridden by CLI flags
+    if profile_str.is_none() { if let Some(p) = manifest_profile { profile_str = Some(p); } }
+    if target.is_none() { if let Some(t) = manifest_target { target = Some(t); } }
 
     // Resolve profile (default: sovereign-offline)
     let profile = match profile_str.as_deref() {
