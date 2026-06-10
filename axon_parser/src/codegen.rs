@@ -910,6 +910,43 @@ impl LlvmEmitter {
                 let _ = (params, body, fn_name); // trampoline deferred to M3-full
                 Some(env_alloca)
             }
+            // P23-M3: AsmBlock codegen — emit LLVM inline assembly
+            // aarch64 SVC #0: inputs → registers, clobbers as ~{reg},
+            // volatile adds sideeffect marker + ~{memory} clobber
+            HirExprKind::AsmBlock { template, outputs, inputs, clobbers, volatile } => {
+                let mut input_vals: Vec<(String, String)> = Vec::new();
+                for (constraint, expr) in inputs {
+                    if let Some(v) = self.emit_expr(expr) {
+                        input_vals.push((constraint.clone(), v));
+                    }
+                }
+                let has_output = !outputs.is_empty();
+                let ret_ty = if has_output { "i64" } else { "void" };
+                let mut constraints: Vec<String> = Vec::new();
+                for (c, _) in outputs { constraints.push(c.clone()); }
+                for (c, _) in &input_vals { constraints.push(c.clone()); }
+                for clob in clobbers { constraints.push(format!("~{{{}}}", clob)); }
+                if *volatile { constraints.push("~{memory}".to_string()); }
+                let constraint_str = constraints.join(",");
+                let arg_list = input_vals.iter()
+                    .map(|(_, v)| format!("i64 {}", v))
+                    .collect::<Vec<_>>().join(", ");
+                let sideeffect = if *volatile { " sideeffect" } else { "" };
+                if has_output {
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!(
+                        "  {} = call {} asm{} \"{}\", \"{}\"({})",
+                        tmp, ret_ty, sideeffect, template, constraint_str, arg_list
+                    ));
+                    Some(tmp)
+                } else {
+                    self.emit_line(&format!(
+                        "  call {} asm{} \"{}\", \"{}\"({})",
+                        ret_ty, sideeffect, template, constraint_str, arg_list
+                    ));
+                    None
+                }
+            }
             _ => None,
         }
     }

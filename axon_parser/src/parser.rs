@@ -1410,3 +1410,86 @@ mod atomic_tests {
     }
 }
 
+#[cfg(test)]
+mod asm_codegen_tests {
+    use super::*;
+    use crate::hir::lower;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        crate::codegen::emit_ir(&hir)
+    }
+
+    #[test]
+    fn tp23_11_asm_nop_emits_call_asm() {
+        // asm!("nop") — no operands, no output — emits void asm call
+        let ir = compile_to_ir(r#"fn f() { asm!("nop"); }"#);
+        assert!(ir.contains("call void asm"), "asm!(nop) must emit void asm call, got:
+{}", ir);
+        assert!(ir.contains("nop"), "template must appear in IR");
+    }
+
+    #[test]
+    fn tp23_12_asm_volatile_sideeffect() {
+        // volatile asm must carry sideeffect marker
+        let ir = compile_to_ir(r#"fn f() { asm!("dmb sy" : : : : "volatile"); }"#);
+        assert!(ir.contains("sideeffect"), "volatile asm must emit sideeffect, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp23_13_asm_svc_with_input() {
+        // seL4 SVC with input operand
+        let ir = compile_to_ir(r#"fn sel4_call(msg: u64) { asm!("svc #0" : : "r"(msg) : "x0" : "volatile"); }"#);
+        assert!(ir.contains("svc #0"), "SVC template must appear in IR, got:
+{}", ir);
+        assert!(ir.contains("sideeffect"), "SVC must be volatile/sideeffect");
+    }
+
+    #[test]
+    fn tp23_14_asm_clobber_encoded() {
+        // clobbers must appear as ~{reg} in constraint string
+        let ir = compile_to_ir(r#"fn f() { asm!("svc #0" : : : "x7"); }"#);
+        assert!(ir.contains("~{x7}"), "clobber x7 must appear as ~{{x7}} in IR, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp23_15_asm_memory_clobber_on_volatile() {
+        // volatile asm must add ~{memory} clobber
+        let ir = compile_to_ir(r#"fn f() { asm!("svc #0" : : : : "volatile"); }"#);
+        assert!(ir.contains("~{memory}"), "volatile asm must add ~{{memory}} clobber, got:
+{}", ir);
+    }
+}
+
+#[cfg(test)]
+mod asm_debug {
+    use super::*;
+    use crate::hir::{lower, HirExprKind, HirStmtKind, HirItem};
+
+    #[test]
+    fn tp23_debug_hir_asm_node() {
+        let src = r#"fn f() { asm!("nop"); }"#;
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        for item in &hir.items {
+            if let HirItem::Fn(f) = item {
+                if let HirExprKind::Block(stmts, _) = &f.body.kind {
+                    for stmt in stmts {
+                        println!("STMT: {:?}", stmt.kind);
+                        if let HirStmtKind::Expr(e) = &stmt.kind {
+                            println!("EXPR KIND: {:?}", std::mem::discriminant(&e.kind));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
