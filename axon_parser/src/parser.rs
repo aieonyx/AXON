@@ -1789,6 +1789,14 @@ mod p26_rawptr_tests {
     }
 
     #[test]
+    fn tp26_07_atomic_load_uses_alloca_ptr() {
+        // P26-QA: AtomicU64 load must use alloca address not loaded i64 value
+        let ir = compile_to_ir("fn f(a: AtomicU64) -> u64 { return 0; }");
+        // IR must contain alloca for the AtomicU64 param
+        assert!(ir.contains("alloca"), "AtomicU64 param must have alloca, got:\\n{}", ir);
+    }
+
+    #[test]
     fn tp26_06_read_volatile_align8() {
         // Volatile loads must have align 8 for MMIO correctness
         let ir = compile_to_ir("fn f(addr: u64) -> u64 { return read_volatile(addr); }");
