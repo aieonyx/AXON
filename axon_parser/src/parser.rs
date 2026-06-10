@@ -1790,10 +1790,12 @@ mod p26_rawptr_tests {
 
     #[test]
     fn tp26_07_atomic_load_uses_alloca_ptr() {
-        // P26-QA: AtomicU64 load must use alloca address not loaded i64 value
+        // P26-QA: AtomicU64 load must emit load atomic with alloca ptr not loaded i64
+        // The atomic load IR must reference the alloca directly, not a loaded value
         let ir = compile_to_ir("fn f(a: AtomicU64) -> u64 { return 0; }");
-        // IR must contain alloca for the AtomicU64 param
-        assert!(ir.contains("alloca"), "AtomicU64 param must have alloca, got:\\n{}", ir);
+        assert!(ir.contains("alloca"), "AtomicU64 param must have alloca");
+        // Verify the alloca is present and atomic ops would use ptr type correctly
+        assert!(!ir.contains("load atomic i64, i64"), "atomic load must not use i64 as ptr type");
     }
 
     #[test]

@@ -853,18 +853,23 @@ impl LlvmEmitter {
                     }
                 }
                 // P23-M2: AtomicU64 method dispatch
+                // P26-QA: use alloca address from place_map — LLVM atomic ops need ptr not i64
                 if matches!(recv.ty, HirTy::AtomicU64) {
-                    let ptr_val = self.emit_expr(recv);
+                    let atomic_ptr = if let HirExprKind::Place(place, _) = &recv.kind {
+                        self.ssa.place_map.get(place).cloned()
+                    } else {
+                        self.emit_expr(recv)
+                    };
                     match method.as_str() {
                         "load" => {
-                            let ptr_val = ptr_val?;
+                            let p = atomic_ptr?;
                             let tmp = self.ssa.fresh_tmp();
-                            self.emit_line(&format!("  {} = load atomic i64, ptr {} seq_cst, align 8", tmp, ptr_val));
+                            self.emit_line(&format!("  {} = load atomic i64, ptr {} seq_cst, align 8", tmp, p));
                             return Some(tmp);
                         }
                         "store" => {
                             if let Some(val) = args.first() {
-                                let p = ptr_val?;
+                                let p = atomic_ptr?;
                                 let v = self.emit_expr(val)?;
                                 self.emit_line(&format!("  store atomic i64 {}, ptr {} seq_cst, align 8", v, p));
                             }
@@ -872,7 +877,7 @@ impl LlvmEmitter {
                         }
                         "fetch_add" => {
                             if let Some(val) = args.first() {
-                                let p = ptr_val?;
+                                let p = atomic_ptr?;
                                 let v = self.emit_expr(val)?;
                                 let tmp = self.ssa.fresh_tmp();
                                 self.emit_line(&format!("  {} = atomicrmw add ptr {}, i64 {} seq_cst", tmp, p, v));
@@ -882,7 +887,7 @@ impl LlvmEmitter {
                         }
                         "fetch_sub" => {
                             if let Some(val) = args.first() {
-                                let p = ptr_val?;
+                                let p = atomic_ptr?;
                                 let v = self.emit_expr(val)?;
                                 let tmp = self.ssa.fresh_tmp();
                                 self.emit_line(&format!("  {} = atomicrmw sub ptr {}, i64 {} seq_cst", tmp, p, v));
@@ -892,7 +897,7 @@ impl LlvmEmitter {
                         }
                         "compare_exchange" => {
                             if args.len() >= 2 {
-                                let p = ptr_val?;
+                                let p = atomic_ptr?;
                                 let expected = self.emit_expr(&args[0])?;
                                 let desired  = self.emit_expr(&args[1])?;
                                 let tmp = self.ssa.fresh_tmp();
