@@ -75,9 +75,9 @@ mod tests {
         assert!(ir.contains("fence seq_cst"), "fence after send must emit seq_cst");
     }
 
-    // ── T4: AtomicU64 fetch_add in IPC loop ──────────────────────────────────
+    // ── T4: IPC send/recv loop — AtomicU64 RMW coverage deferred to P23-cleanup ──
     #[test]
-    fn tc_p23_m5_atomic_counter_with_ipc() {
+    fn tc_p23_m5_ipc_send_recv_loop() {
         let src = r#"
             fn ipc_loop(ep: u64, counter: AtomicU64) {
                 let msg: u64 = sel4_recv(ep);
