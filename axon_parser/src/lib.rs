@@ -25,3 +25,4 @@ pub mod borrow;
 #[cfg(test)]
 mod verify_integration;
 pub mod driver;
+pub mod axon_manifest; // P28: axon.toml manifest parser
