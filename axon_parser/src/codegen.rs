@@ -553,19 +553,27 @@ impl LlvmEmitter {
                 if fn_name == "memset" {
                     let mut av: Vec<String> = Vec::new();
                     for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
-                    let ptr = av.first().cloned().unwrap_or_default();
+                    let ptr_i64 = av.first().cloned().unwrap_or_default();
                     let val = av.get(1).cloned().unwrap_or_else(|| "0".to_string());
                     let len = av.get(2).cloned().unwrap_or_else(|| "0".to_string());
-                    self.emit_line(&format!("  call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)", ptr, val, len));
+                    // P25-QA: i64 → ptr cast required by LLVM intrinsic signature
+                    let ptr_cast = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = inttoptr i64 {} to ptr", ptr_cast, ptr_i64));
+                    self.emit_line(&format!("  call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)", ptr_cast, val, len));
                     return None;
                 }
                 if fn_name == "memcpy" {
                     let mut av: Vec<String> = Vec::new();
                     for a in args { if let Some(v) = self.emit_expr(a) { av.push(v); } }
-                    let dst = av.first().cloned().unwrap_or_default();
-                    let src = av.get(1).cloned().unwrap_or_default();
+                    let dst_i64 = av.first().cloned().unwrap_or_default();
+                    let src_i64 = av.get(1).cloned().unwrap_or_default();
                     let len = av.get(2).cloned().unwrap_or_else(|| "0".to_string());
-                    self.emit_line(&format!("  call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)", dst, src, len));
+                    // P25-QA: i64 → ptr casts required by LLVM intrinsic signature
+                    let dst_cast = self.ssa.fresh_tmp();
+                    let src_cast = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = inttoptr i64 {} to ptr", dst_cast, dst_i64));
+                    self.emit_line(&format!("  {} = inttoptr i64 {} to ptr", src_cast, src_i64));
+                    self.emit_line(&format!("  call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)", dst_cast, src_cast, len));
                     return None;
                 }
                 // P25-M1: axon_abort() — panic=abort equivalent, emits llvm.trap
