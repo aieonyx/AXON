@@ -1493,3 +1493,60 @@ mod asm_debug {
     }
 }
 
+#[cfg(test)]
+mod sel4_asm_tests {
+    use super::*;
+    use crate::hir::lower;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        crate::codegen::emit_ir(&hir)
+    }
+
+    #[test]
+    fn tp23_16_sel4_call_emits_svc() {
+        let ir = compile_to_ir("fn f(ep: u64, msg: u64) -> u64 { return sel4_call(ep, msg); }");
+        assert!(ir.contains("svc #0"), "sel4_call must emit SVC #0, got:
+{}", ir);
+        assert!(ir.contains("sideeffect"), "sel4_call must be sideeffect");
+        assert!(ir.contains("mov x7"), "sel4_call must load syscall number into x7");
+    }
+
+    #[test]
+    fn tp23_17_sel4_send_emits_svc_void() {
+        let ir = compile_to_ir("fn f(ep: u64, msg: u64) { sel4_send(ep, msg); }");
+        assert!(ir.contains("svc #0"), "sel4_send must emit SVC #0, got:
+{}", ir);
+        assert!(ir.contains("call void asm"), "sel4_send must be void return");
+        assert!(ir.contains("sideeffect"), "sel4_send must be sideeffect");
+    }
+
+    #[test]
+    fn tp23_18_sel4_recv_emits_svc_with_return() {
+        let ir = compile_to_ir("fn f(ep: u64) -> u64 { return sel4_recv(ep); }");
+        assert!(ir.contains("svc #0"), "sel4_recv must emit SVC #0, got:
+{}", ir);
+        assert!(ir.contains("sideeffect"), "sel4_recv must be sideeffect");
+        assert!(ir.contains("call i64 asm"), "sel4_recv must return i64");
+    }
+
+    #[test]
+    fn tp23_19_sel4_memory_clobber() {
+        // All seL4 syscalls must clobber memory (cross-domain IPC)
+        let ir = compile_to_ir("fn f(ep: u64, msg: u64) -> u64 { return sel4_call(ep, msg); }");
+        assert!(ir.contains("~{memory}"), "seL4 syscall must clobber memory, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp23_20_sel4_x7_clobber() {
+        // x7 holds syscall number — must be declared as clobber
+        let ir = compile_to_ir("fn f(ep: u64, msg: u64) -> u64 { return sel4_call(ep, msg); }");
+        assert!(ir.contains("~{x7}"), "seL4 syscall must clobber x7, got:
+{}", ir);
+    }
+}
+
