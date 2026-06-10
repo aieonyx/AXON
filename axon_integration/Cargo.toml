@@ -16,3 +16,4 @@ axon_std         = { path = "../axon_std"         }
 libc             = "0.2"
 
 [dev-dependencies]
+axon_parser = { path = "../axon_parser" }
