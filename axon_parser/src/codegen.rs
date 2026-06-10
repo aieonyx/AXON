@@ -481,6 +481,48 @@ impl LlvmEmitter {
                     "axon_ipc_recv"  => Some("axon_ipc_recv"),
                     _ => None,
                 };
+                // P23-M4: sovereign seL4 syscall intrinsics — pure AXON asm!, zero C glue
+                // seL4 aarch64 ABI: syscall# in x7, args in x0-x6, return in x0, SVC #0
+                // sel4_call(ep: u64, msginfo: u64) -> u64
+                if fn_name == "sel4_call" {
+                    let mut arg_vals: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { arg_vals.push(v); } }
+                    let ep  = arg_vals.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let msg = arg_vals.get(1).cloned().unwrap_or_else(|| "0".to_string());
+                    let tmp = self.ssa.fresh_tmp();
+                    // Load syscall number (seL4_SysSend=3) into x7, ep→x0, msg→x1
+                    self.emit_line(&format!(
+                        "  {} = call i64 asm sideeffect \"mov x7, #3; svc #0\", \"{{{}}},{{{}}},~{{x7}},~{{memory}}\"(i64 {}, i64 {})",
+                        tmp, "={x0}", "r", ep, msg
+                    ));
+                    return Some(tmp);
+                }
+                // sel4_send(ep: u64, msginfo: u64)
+                if fn_name == "sel4_send" {
+                    let mut arg_vals: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { arg_vals.push(v); } }
+                    let ep  = arg_vals.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let msg = arg_vals.get(1).cloned().unwrap_or_else(|| "0".to_string());
+                    // seL4_SysNBSend=6, no return value
+                    self.emit_line(&format!(
+                        "  call void asm sideeffect \"mov x7, #6; svc #0\", \"r,r,~{{x7}},~{{memory}}\"(i64 {}, i64 {})",
+                        ep, msg
+                    ));
+                    return None;
+                }
+                // sel4_recv(ep: u64) -> u64
+                if fn_name == "sel4_recv" {
+                    let mut arg_vals: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { arg_vals.push(v); } }
+                    let ep = arg_vals.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let tmp = self.ssa.fresh_tmp();
+                    // seL4_SysRecv=2, ep→x0, return msginfo in x0
+                    self.emit_line(&format!(
+                        "  {} = call i64 asm sideeffect \"mov x7, #2; svc #0\", \"{{{}}},r,~{{x7}},~{{memory}}\"(i64 {})",
+                        tmp, "={x0}", ep
+                    ));
+                    return Some(tmp);
+                }
                 // P23-M2: memory fence intrinsics
                 if fn_name == "fence" {
                     self.emit_line("  fence seq_cst");
