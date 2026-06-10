@@ -11,3 +11,4 @@
 #[cfg(test)] mod test_audit;
 #[cfg(test)] mod test_ai;
 #[cfg(test)] mod test_pipeline;
+#[cfg(test)] mod test_sel4_asm; // P23-M5: seL4 syscall roundtrip
