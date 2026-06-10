@@ -35,6 +35,9 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         HirTy::Param(_) => "i64", // P17-M1: uninstantiated generic — conservative i64
         HirTy::Dyn(_)  => "ptr",
         HirTy::CStr    => "ptr", // P21-M2: C string is a null-terminated ptr
+        // P23-M2: AtomicU64 — LLVM represents atomics as plain integer types;
+        // atomicity is encoded in the load/store/rmw instructions themselves
+        HirTy::AtomicU64 => "i64",
         // P20-M1: seL4 IPC types — capability slots are u64 words in seL4 ABI
         HirTy::SeL4Endpoint => "i64",
         HirTy::SeL4Badge    => "i64",
@@ -478,6 +481,16 @@ impl LlvmEmitter {
                     "axon_ipc_recv"  => Some("axon_ipc_recv"),
                     _ => None,
                 };
+                // P23-M2: memory fence intrinsics
+                if fn_name == "fence" {
+                    self.emit_line("  fence seq_cst");
+                    return None;
+                }
+                if fn_name == "compiler_fence" {
+                    // compiler_fence: LLVM memory barrier without hardware fence
+                    self.emit_line("  fence syncscope(\"singlethread\") seq_cst");
+                    return None;
+                }
                 if let Some(ipc_fn) = ipc_intrinsic {
                     let arg_strs: Vec<String> = args.iter()
                         .filter_map(|a| {

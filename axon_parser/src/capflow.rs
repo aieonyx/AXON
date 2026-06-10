@@ -153,6 +153,10 @@ fn collect_callees_from_expr(expr: &Expr, out: &mut Vec<String>) {
         | Expr::Continue(_) | Expr::Return(None, _) | Expr::Break(None, _) => {}
         Expr::Closure(_, body, _) => collect_callees_from_expr(body, out),
         Expr::Try(e, _) => collect_callees_from_expr(e, out),
+        // P23-M1: asm! inputs may contain callees
+        Expr::AsmBlock { inputs, .. } => {
+            for (_, e) in inputs { collect_callees_from_expr(e, out); }
+        }
     }
 }
 

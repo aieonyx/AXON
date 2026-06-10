@@ -65,6 +65,15 @@ pub enum Expr {
     Closure(Vec<(Pat, Option<Box<Ty>>)>, Box<Expr>, Span),
     /// P16-M3: ? operator
     Try(Box<Expr>, Span),
+    /// P23-M1: inline assembly  asm!("template" : outputs : inputs : clobbers : options)
+    AsmBlock {
+        template: String,
+        outputs: Vec<(String, Box<Expr>)>,
+        inputs:  Vec<(String, Box<Expr>)>,
+        clobbers: Vec<String>,
+        volatile: bool,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1022,9 +1031,76 @@ impl Parser {
                 let body = self.parse_expr()?;
                 Ok(Expr::Closure(params, Box::new(body), s))
             }
+            TokenKind::Asm => self.parse_asm_expr(),
             other => Err(ParseError::new(format!("expected expression, got {:?}", other), s))
         }
     }
+    // P23-M1: asm!("template" : out-list : in-list : clobber-list : options)
+    fn parse_asm_expr(&mut self) -> Result<Expr, ParseError> {
+        let s = self.current_span();
+        self.expect(&TokenKind::Asm)?;
+        self.expect(&TokenKind::Bang)?;
+        self.expect(&TokenKind::LParen)?;
+        let template = match self.peek().clone() {
+            TokenKind::StringLit(t) => { self.advance(); t }
+            _ => return Err(ParseError::new("asm!: expected template string", self.current_span())),
+        };
+        let mut outputs: Vec<(String, Box<Expr>)> = Vec::new();
+        let mut inputs:  Vec<(String, Box<Expr>)> = Vec::new();
+        let mut clobbers: Vec<String> = Vec::new();
+        let mut volatile = false;
+        // section 1 — outputs
+        if self.eat(&TokenKind::Colon) {
+            while !matches!(self.peek(), TokenKind::Colon | TokenKind::RParen | TokenKind::Eof) {
+                let constraint = match self.peek().clone() {
+                    TokenKind::StringLit(c) => { self.advance(); c }
+                    _ => break,
+                };
+                self.expect(&TokenKind::LParen)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RParen)?;
+                outputs.push((constraint, Box::new(expr)));
+                if !self.eat(&TokenKind::Comma) { break; }
+            }
+        }
+        // section 2 — inputs
+        if self.eat(&TokenKind::Colon) {
+            while !matches!(self.peek(), TokenKind::Colon | TokenKind::RParen | TokenKind::Eof) {
+                let constraint = match self.peek().clone() {
+                    TokenKind::StringLit(c) => { self.advance(); c }
+                    _ => break,
+                };
+                self.expect(&TokenKind::LParen)?;
+                let expr = self.parse_expr()?;
+                self.expect(&TokenKind::RParen)?;
+                inputs.push((constraint, Box::new(expr)));
+                if !self.eat(&TokenKind::Comma) { break; }
+            }
+        }
+        // section 3 — clobbers
+        if self.eat(&TokenKind::Colon) {
+            while !matches!(self.peek(), TokenKind::Colon | TokenKind::RParen | TokenKind::Eof) {
+                match self.peek().clone() {
+                    TokenKind::StringLit(c) => { clobbers.push(c); self.advance(); }
+                    _ => break,
+                }
+                if !self.eat(&TokenKind::Comma) { break; }
+            }
+        }
+        // section 4 — options
+        if self.eat(&TokenKind::Colon) {
+            while !matches!(self.peek(), TokenKind::RParen | TokenKind::Eof) {
+                if let TokenKind::StringLit(opt) = self.peek().clone() {
+                    if opt == "volatile" { volatile = true; }
+                    self.advance();
+                } else { self.advance(); }
+                if !self.eat(&TokenKind::Comma) { break; }
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        Ok(Expr::AsmBlock { template, outputs, inputs, clobbers, volatile, span: s })
+    }
+
     fn parse_if_expr(&mut self) -> Result<Expr, ParseError> {
         let s = self.current_span(); self.expect(&TokenKind::If)?;
         let cond = self.parse_expr()?; let then = self.parse_block_expr()?;
@@ -1189,3 +1265,148 @@ mod axon_parser_tests {
     }
 
 }
+
+#[cfg(test)]
+mod asm_tests {
+    use super::*;
+
+    fn parse_asm(src: &str) -> Expr {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex failed");
+        let mut p = Parser::new(tokens);
+        p.parse_asm_expr().expect("parse_asm_expr failed")
+    }
+
+    #[test]
+    fn tp23_01_asm_template_only() {
+        // asm!("nop") — no operands
+        let e = parse_asm(r#"asm!("nop")"#);
+        match e {
+            Expr::AsmBlock { template, outputs, inputs, clobbers, volatile, .. } => {
+                assert_eq!(template, "nop");
+                assert!(outputs.is_empty());
+                assert!(inputs.is_empty());
+                assert!(clobbers.is_empty());
+                assert!(!volatile);
+            }
+            _ => panic!("expected AsmBlock"),
+        }
+    }
+
+    #[test]
+    fn tp23_02_asm_with_inputs() {
+        // asm!("mov x0, $0" : : "r"(42))
+        let e = parse_asm(r#"asm!("mov x0, $0" : : "r"(42))"#);
+        match e {
+            Expr::AsmBlock { template, outputs, inputs, .. } => {
+                assert_eq!(template, "mov x0, $0");
+                assert!(outputs.is_empty());
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(inputs[0].0, "r");
+            }
+            _ => panic!("expected AsmBlock"),
+        }
+    }
+
+    #[test]
+    fn tp23_03_asm_with_clobbers() {
+        // asm!("svc #0" : : : "x0", "x1")
+        let e = parse_asm(r#"asm!("svc #0" : : : "x0", "x1")"#);
+        match e {
+            Expr::AsmBlock { clobbers, .. } => {
+                assert_eq!(clobbers, vec!["x0", "x1"]);
+            }
+            _ => panic!("expected AsmBlock"),
+        }
+    }
+
+    #[test]
+    fn tp23_04_asm_volatile_option() {
+        // asm!("dmb sy" : : : : "volatile")
+        let e = parse_asm(r#"asm!("dmb sy" : : : : "volatile")"#);
+        match e {
+            Expr::AsmBlock { volatile, .. } => {
+                assert!(volatile, "expected volatile=true");
+            }
+            _ => panic!("expected AsmBlock"),
+        }
+    }
+
+    #[test]
+    fn tp23_05_asm_full_seL4_svc() {
+        // Full seL4 syscall pattern: asm!("svc #0" : "=r"(out) : "r"(in_val) : "x7" : "volatile")
+        let e = parse_asm(r#"asm!("svc #0" : "=r"(result) : "r"(msg) : "x7" : "volatile")"#);
+        match e {
+            Expr::AsmBlock { template, outputs, inputs, clobbers, volatile, .. } => {
+                assert_eq!(template, "svc #0");
+                assert_eq!(outputs.len(), 1);
+                assert_eq!(outputs[0].0, "=r");
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(inputs[0].0, "r");
+                assert_eq!(clobbers, vec!["x7"]);
+                assert!(volatile);
+            }
+            _ => panic!("expected AsmBlock"),
+        }
+    }
+
+    #[test]
+    fn tp23_06_asm_hir_lower() {
+        // Verify asm! survives full HIR lowering
+        let src = r#"fn sel4_nop() { asm!("nop"); }"#;
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = crate::hir::lower(items);
+        assert!(!hir.items.is_empty(), "HIR items should not be empty");
+    }
+}
+
+#[cfg(test)]
+mod atomic_tests {
+    use super::*;
+    use crate::hir::lower;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        crate::codegen::emit_ir(&hir)
+    }
+
+    #[test]
+    fn tp23_07_atomic_type_resolves() {
+        // AtomicU64 type resolves without error
+        let ir = compile_to_ir("fn f(a: AtomicU64) -> u64 { return 0; }");
+        assert!(ir.contains("i64"), "AtomicU64 should map to i64 in IR");
+    }
+
+    #[test]
+    fn tp23_08_fence_emits_llvm_fence() {
+        let ir = compile_to_ir("fn f() { fence(); }");
+        assert!(ir.contains("fence seq_cst"), "fence() must emit LLVM fence seq_cst, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tp23_09_compiler_fence_emits_singlethread() {
+        let ir = compile_to_ir("fn f() { compiler_fence(); }");
+        assert!(ir.contains("fence syncscope"), "compiler_fence() must emit syncscope fence, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tp23_10_atomic_hir_type() {
+        // AtomicU64 lowers to HirTy::AtomicU64
+        let tokens = crate::lexer::Lexer::new("fn f(a: AtomicU64) {}").tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        let fn_item = hir.items.iter().find_map(|i| {
+            if let crate::hir::HirItem::Fn(f) = i { Some(f) } else { None }
+        }).expect("fn not found");
+        assert!(
+            fn_item.params.iter().any(|(_, ty)| matches!(ty, crate::hir::HirTy::AtomicU64)),
+            "param should be HirTy::AtomicU64"
+        );
+    }
+}
+

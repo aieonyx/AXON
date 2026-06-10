@@ -238,6 +238,8 @@ impl BorrowChecker {
             // Leaves — no sub-expressions
             HirExprKind::Lit(_) | HirExprKind::Path(_) | HirExprKind::Continue
             | HirExprKind::Break(_) => {}
+            // P23-M1: asm! block — borrow tracking deferred (opaque to borrow checker)
+            HirExprKind::AsmBlock { .. } => {}
         }
     }
 
