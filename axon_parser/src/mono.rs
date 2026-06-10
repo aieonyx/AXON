@@ -191,6 +191,10 @@ impl MonoTable {
             is_ghost: template.is_ghost,
             span: template.span.clone(),
             required_caps: template.required_caps.clone(),
+            // P24-M1: propagate linker control attrs through monomorphization
+            no_mangle: template.no_mangle,
+            link_section: template.link_section.clone(),
+            stack_size: template.stack_size,
         })
     }
 }

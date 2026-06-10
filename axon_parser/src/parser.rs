@@ -249,11 +249,23 @@ impl Parser {
                 other => return Err(ParseError::new(format!("expected attr name, got {:?}", other), name_span)),
             };
             let mut args = Vec::new();
-            if self.eat(&TokenKind::LParen) {
+            // P24-M1: handle both #[attr(val)] and #[attr = val] forms
+            if self.eat(&TokenKind::Eq) {
+                // #[name = value] — single value form
+                match self.peek().clone() {
+                    TokenKind::StringLit(s) => { self.advance(); args.push(s); }
+                    TokenKind::IntLit(n)    => { self.advance(); args.push(n.to_string()); }
+                    TokenKind::Ident(s)     => { self.advance(); args.push(s); }
+                    _ => {}
+                }
+            } else if self.eat(&TokenKind::LParen) {
+                // #[name(val, ...)] — parenthesised form
                 while !matches!(self.peek(), TokenKind::RParen | TokenKind::Eof) {
                     match self.peek().clone() {
-                        TokenKind::Ident(s) => { self.advance(); args.push(s); }
-                        TokenKind::Comma => { self.advance(); }
+                        TokenKind::Ident(s)     => { self.advance(); args.push(s); }
+                        TokenKind::StringLit(s) => { self.advance(); args.push(s); }
+                        TokenKind::IntLit(n)    => { self.advance(); args.push(n.to_string()); }
+                        TokenKind::Eq | TokenKind::Comma => { self.advance(); }
                         _ => { self.advance(); }
                     }
                 }
@@ -1547,6 +1559,86 @@ mod sel4_asm_tests {
         let ir = compile_to_ir("fn f(ep: u64, msg: u64) -> u64 { return sel4_call(ep, msg); }");
         assert!(ir.contains("~{x7}"), "seL4 syscall must clobber x7, got:
 {}", ir);
+    }
+}
+
+#[cfg(test)]
+mod p24_linker_tests {
+    use super::*;
+    use crate::hir::lower;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        crate::codegen::emit_ir(&hir)
+    }
+
+    fn get_hir_fn(src: &str) -> crate::hir::HirFn {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        hir.items.into_iter().find_map(|i| {
+            if let crate::hir::HirItem::Fn(f) = i { Some(f) } else { None }
+        }).expect("fn not found")
+    }
+
+    #[test]
+    fn tp24_01_no_mangle_hir() {
+        let f = get_hir_fn(r#"#[no_mangle] pub fn pd_entry() {}"#);
+        assert!(f.no_mangle, "no_mangle must be true");
+    }
+
+    #[test]
+    fn tp24_02_link_section_hir() {
+        let f = get_hir_fn(r#"#[link_section = ".text.entry"] pub fn pd_entry() {}"#);
+        assert_eq!(f.link_section.as_deref(), Some(".text.entry"));
+    }
+
+    #[test]
+    fn tp24_03_stack_size_hir() {
+        let f = get_hir_fn(r#"#[stack_size = 4096] pub fn pd_entry() {}"#);
+        assert_eq!(f.stack_size, Some(4096));
+    }
+
+    #[test]
+    fn tp24_04_no_mangle_ir_external_linkage() {
+        // #[no_mangle] must produce external linkage (no "internal" prefix)
+        let ir = compile_to_ir(r#"#[no_mangle] fn pd_entry() {}"#);
+        assert!(!ir.contains("internal"), "no_mangle fn must not have internal linkage");
+        assert!(ir.contains("@pd_entry"), "fn name must appear unmangled in IR");
+    }
+
+    #[test]
+    fn tp24_05_link_section_ir() {
+        let ir = compile_to_ir(r#"#[link_section = ".text.entry"] pub fn pd_entry() {}"#);
+        assert!(ir.contains(".text.entry"), "link_section must appear in IR, got:\n{}", ir);
+        assert!(ir.contains("section"), "section keyword must appear in IR");
+    }
+
+    #[test]
+    fn tp24_06_stack_size_ir() {
+        let ir = compile_to_ir(r#"#[stack_size = 8192] pub fn pd_entry() {}"#);
+        assert!(ir.contains("stack_size=8192"), "stack_size must appear in IR, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tp24_07_full_pd_entry_point() {
+        // Full seL4 PD entry point pattern
+        let ir = compile_to_ir(r#"
+            #[no_mangle]
+            #[link_section = ".text.entry"]
+            #[stack_size = 4096]
+            pub fn pd_entry(ep: u64) -> u64 {
+                return sel4_recv(ep);
+            }
+        "#);
+        assert!(ir.contains("@pd_entry"), "PD entry must be unmangled");
+        assert!(ir.contains(".text.entry"), "PD entry must be in .text.entry");
+        assert!(ir.contains("stack_size=4096"), "PD entry must declare stack size");
+        assert!(ir.contains("svc #0"), "PD entry must emit seL4 syscall");
     }
 }
 

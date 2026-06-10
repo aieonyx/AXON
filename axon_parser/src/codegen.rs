@@ -275,10 +275,24 @@ impl LlvmEmitter {
         // P19-QA: non-pub fns get internal linkage (LLVM IPO + tc5 fix)
         // Exception: main must always be external (linker entry point)
         let linkage = if f.is_pub || f.name == "main" { "" } else { "internal " };
-        if matches!(f.ret, HirTy::Unit | HirTy::Never) {
-            self.emit_line(&format!("define {}void @{}({}) {{", linkage, f.name, params.join(", ")));
+        // P24-M1: #[no_mangle] forces external linkage regardless of is_pub
+        let linkage = if f.no_mangle { "" } else { linkage };
+        // P24-M1: #[link_section] appends section attribute to define
+        let section_attr = if let Some(ref sec) = f.link_section {
+            format!(" section \"{}\"", sec)
         } else {
-            self.emit_line(&format!("define {}{} @{}({}) {{", linkage, ret_ty, f.name, params.join(", ")));
+            String::new()
+        };
+        // P24-M1: #[stack_size] emits sovereign stack size as LLVM function attr
+        let stack_attr = if let Some(sz) = f.stack_size {
+            format!(" #0 ; stack_size={}", sz)
+        } else {
+            String::new()
+        };
+        if matches!(f.ret, HirTy::Unit | HirTy::Never) {
+            self.emit_line(&format!("define {}void @{}({}){}{}  {{", linkage, f.name, params.join(", "), section_attr, stack_attr));
+        } else {
+            self.emit_line(&format!("define {}{} @{}({}){}{}  {{", linkage, ret_ty, f.name, params.join(", "), section_attr, stack_attr));
         }
         self.emit_line("entry:");
         self.param_allocas.clear();
