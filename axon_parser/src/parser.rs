@@ -1735,3 +1735,64 @@ mod p25_nostd_tests {
     }
 }
 
+#[cfg(test)]
+mod p26_rawptr_tests {
+    use super::*;
+    use crate::hir::lower;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        crate::codegen::emit_ir(&hir)
+    }
+
+    #[test]
+    fn tp26_01_read_volatile_emits_volatile_load() {
+        let ir = compile_to_ir("fn f(addr: u64) -> u64 { return read_volatile(addr); }");
+        assert!(ir.contains("load volatile i64"), "read_volatile must emit volatile load, got:\n{}", ir);
+        assert!(ir.contains("inttoptr"), "read_volatile must cast i64 to ptr");
+    }
+
+    #[test]
+    fn tp26_02_write_volatile_emits_volatile_store() {
+        let ir = compile_to_ir("fn f(addr: u64, val: u64) { write_volatile(addr, val); }");
+        assert!(ir.contains("store volatile i64"), "write_volatile must emit volatile store, got:\n{}", ir);
+        assert!(ir.contains("inttoptr"), "write_volatile must cast i64 to ptr");
+    }
+
+    #[test]
+    fn tp26_03_slice_from_raw_parts_emits_fat_ptr() {
+        let ir = compile_to_ir("fn f(ptr: u64, len: u64) { slice_from_raw_parts(ptr, len); }");
+        assert!(ir.contains("alloca { ptr, i64 }"), "slice_from_raw_parts must alloca fat pointer");
+        assert!(ir.contains("getelementptr inbounds { ptr, i64 }"), "must build fat pointer fields");
+    }
+
+    #[test]
+    fn tp26_04_ptr_ty_maps_to_llvm_ptr() {
+        // HirTy::Ptr must emit as LLVM ptr type
+        let ir = compile_to_ir("fn f(p: *u64) -> u64 { return 0; }");
+        assert!(ir.contains("ptr"), "Ptr type must map to LLVM ptr, got:\n{}", ir);
+    }
+
+    #[test]
+    fn tp26_05_framebuffer_write_pattern() {
+        // Full MMIO framebuffer pixel write pattern
+        let ir = compile_to_ir(r#"
+            fn fb_write_pixel(fb_addr: u64, offset: u64, pixel: u64) {
+                write_volatile(fb_addr + offset, pixel);
+            }
+        "#);
+        assert!(ir.contains("store volatile i64"), "framebuffer write must use volatile store");
+        assert!(ir.contains("inttoptr"), "framebuffer addr must be cast to ptr");
+    }
+
+    #[test]
+    fn tp26_06_read_volatile_align8() {
+        // Volatile loads must have align 8 for MMIO correctness
+        let ir = compile_to_ir("fn f(addr: u64) -> u64 { return read_volatile(addr); }");
+        assert!(ir.contains("align 8"), "volatile load must have align 8, got:\n{}", ir);
+    }
+}
+
