@@ -1642,3 +1642,96 @@ mod p24_linker_tests {
     }
 }
 
+#[cfg(test)]
+mod p25_nostd_tests {
+    use super::*;
+    use crate::hir::lower;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        crate::codegen::emit_ir(&hir)
+    }
+
+    fn get_hir_fn(src: &str) -> crate::hir::HirFn {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        hir.items.into_iter().find_map(|i| {
+            if let crate::hir::HirItem::Fn(f) = i { Some(f) } else { None }
+        }).expect("fn not found")
+    }
+
+    #[test]
+    fn tp25_01_panic_handler_hir() {
+        let f = get_hir_fn(r#"#[panic_handler] fn sovereign_panic() {}"#);
+        assert!(f.is_panic_handler, "is_panic_handler must be true");
+    }
+
+    #[test]
+    fn tp25_02_panic_handler_emits_correct_symbol() {
+        let ir = compile_to_ir(r#"#[panic_handler] fn sovereign_panic() {}"#);
+        assert!(ir.contains("@axon_panic_handler"),
+            "panic_handler must emit @axon_panic_handler, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp25_03_panic_handler_external_linkage() {
+        let ir = compile_to_ir(r#"#[panic_handler] fn sovereign_panic() {}"#);
+        assert!(!ir.contains("internal"),
+            "panic_handler must have external linkage, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp25_04_memset_emits_llvm_intrinsic() {
+        let ir = compile_to_ir(r#"fn f(p: u64, n: u64) { memset(p, 0, n); }"#);
+        assert!(ir.contains("llvm.memset"), "memset must emit llvm.memset intrinsic, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp25_05_memcpy_emits_llvm_intrinsic() {
+        let ir = compile_to_ir(r#"fn f(dst: u64, src: u64, n: u64) { memcpy(dst, src, n); }"#);
+        assert!(ir.contains("llvm.memcpy"), "memcpy must emit llvm.memcpy intrinsic, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp25_06_axon_abort_emits_trap() {
+        let ir = compile_to_ir(r#"fn f() { axon_abort(); }"#);
+        assert!(ir.contains("llvm.trap"), "axon_abort must emit llvm.trap, got:
+{}", ir);
+        assert!(ir.contains("unreachable"), "axon_abort must emit unreachable after trap");
+    }
+
+    #[test]
+    fn tp25_07_llvm_builtins_declared() {
+        // All LLVM builtins must be declared in module preamble
+        let ir = compile_to_ir(r#"fn f() {}"#);
+        assert!(ir.contains("declare void @llvm.memset"), "llvm.memset must be declared");
+        assert!(ir.contains("declare void @llvm.memcpy"), "llvm.memcpy must be declared");
+        assert!(ir.contains("declare void @llvm.trap"),   "llvm.trap must be declared");
+    }
+
+    #[test]
+    fn tp25_08_full_nostd_pd() {
+        // Full no_std PD: panic_handler + memset + abort — the bare-metal seL4 pattern
+        let ir = compile_to_ir(r#"
+            #[panic_handler]
+            #[no_mangle]
+            fn sovereign_panic() {
+                axon_abort();
+            }
+        "#);
+        assert!(ir.contains("@axon_panic_handler"), "PD panic handler symbol must be present");
+        assert!(ir.contains("llvm.trap"), "PD panic must call llvm.trap");
+        assert!(!ir.contains("@malloc"), "no_std PD must not reference malloc");
+        assert!(!ir.contains("@printf"), "no_std PD must not reference printf");
+    }
+}
+
