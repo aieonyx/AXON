@@ -60,6 +60,16 @@ pub fn emit_llvm_ty_owned(ty: &HirTy) -> String {
     match ty {
         HirTy::Array(elem, n) => format!("[{} x {}]", n, emit_llvm_ty_owned(elem)),
         HirTy::Slice(_) => "{ ptr, i64 }".to_string(),
+        // P29-M1: Option<T> → { i1, T } (tag=0 None, tag=1 Some)
+        HirTy::Named(n, args) if n == "Option" => {
+            let inner = args.first().map(emit_llvm_ty_owned).unwrap_or_else(|| "i64".to_string());
+            format!("{{ i1, {} }}", inner)
+        }
+        // P29-M1: Result<T,E> → { i1, T } (tag=1 Ok, tag=0 Err; error type elided)
+        HirTy::Named(n, args) if n == "Result" => {
+            let inner = args.first().map(emit_llvm_ty_owned).unwrap_or_else(|| "i64".to_string());
+            format!("{{ i1, {} }}", inner)
+        }
         _ => emit_llvm_ty(ty).to_string(),
     }
 }
@@ -633,6 +643,45 @@ impl LlvmEmitter {
                     self.emit_line(&format!("  {} = getelementptr inbounds {{ ptr, i64 }}, ptr {}, i32 0, i32 1", gep1, fat));
                     self.emit_line(&format!("  store i64 {}, ptr {}", len, gep1));
                     return Some(fat);
+                }
+                // P29-M1: mem intrinsics — compile-time type size/align
+                // Usage: mem_size_of("u64") / mem_align_of("u32")
+                // Type name passed as string literal for compile-time resolution
+                if fn_name == "mem_size_of" || fn_name == "size_of" {
+                    let ty_name = args.first().and_then(|a| {
+                        if let HirExprKind::Lit(HirLit::Str(ref s)) = a.kind { Some(s.clone()) }
+                        else { None }
+                    }).unwrap_or_else(|| "u64".to_string());
+                    let sz: u64 = match ty_name.as_str() {
+                        "u8" | "i8" | "bool" => 1,
+                        "u16" | "i16" => 2,
+                        "u32" | "i32" | "f32" | "char" => 4,
+                        "u64" | "i64" | "f64" | "usize" | "isize" | "AtomicU64" => 8,
+                        "u128" | "i128" => 16,
+                        "[u8;4]" | "[i8;4]" => 4,
+                        "[u16;4]" | "[i16;4]" => 8,
+                        "[u32;4]" | "[i32;4]" => 16,
+                        "[u64;4]" | "[i64;4]" => 32,
+                        _ => 8,
+                    };
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = add i64 0, {}", tmp, sz));
+                    return Some(tmp);
+                }
+                if fn_name == "mem_align_of" || fn_name == "align_of" {
+                    let ty_name = args.first().and_then(|a| {
+                        if let HirExprKind::Lit(HirLit::Str(ref s)) = a.kind { Some(s.clone()) }
+                        else { None }
+                    }).unwrap_or_else(|| "u64".to_string());
+                    let align: u64 = match ty_name.as_str() {
+                        "u8" | "i8" | "bool" => 1,
+                        "u16" | "i16" => 2,
+                        "u32" | "i32" | "f32" | "char" => 4,
+                        _ => 8,
+                    };
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!("  {} = add i64 0, {}", tmp, align));
+                    return Some(tmp);
                 }
                 // P25-M1: memory builtins — emit LLVM intrinsics directly
                 if fn_name == "memset" {

@@ -1899,3 +1899,85 @@ mod p27_notification_tests {
     }
 }
 
+#[cfg(test)]
+mod p29_core_tests {
+    use super::*;
+    use crate::hir::lower;
+    use crate::codegen::{emit_ir, emit_llvm_ty_owned};
+    use crate::hir::HirTy;
+
+    fn compile_to_ir(src: &str) -> String {
+        let tokens = crate::lexer::Lexer::new(src).tokenize().expect("lex");
+        let mut p = Parser::new(tokens);
+        let items = p.parse_program().expect("parse");
+        let hir = lower(items);
+        emit_ir(&hir)
+    }
+
+    #[test]
+    fn tp29_01_option_ty_owned() {
+        let ty = HirTy::Named("Option".to_string(), vec![HirTy::U64]);
+        let s = emit_llvm_ty_owned(&ty);
+        assert_eq!(s, "{ i1, i64 }", "Option<u64> must map to {{ i1, i64 }}, got: {}", s);
+    }
+
+    #[test]
+    fn tp29_02_result_ty_owned() {
+        let ty = HirTy::Named("Result".to_string(), vec![HirTy::U64, HirTy::I32]);
+        let s = emit_llvm_ty_owned(&ty);
+        assert_eq!(s, "{ i1, i64 }", "Result<u64,i32> must map to {{ i1, i64 }}, got: {}", s);
+    }
+
+    #[test]
+    fn tp29_03_mem_size_of_u64() {
+        let ir = compile_to_ir(r#"fn f() -> u64 { return mem_size_of("u64"); }"#);
+        assert!(ir.contains("add i64 0, 8"), "size_of u64 must be 8, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp29_04_mem_size_of_u8() {
+        let ir = compile_to_ir(r#"fn f() -> u64 { return mem_size_of("u8"); }"#);
+        assert!(ir.contains("add i64 0, 1"), "size_of u8 must be 1, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp29_05_mem_align_of_u32() {
+        let ir = compile_to_ir(r#"fn f() -> u64 { return mem_align_of("u32"); }"#);
+        assert!(ir.contains("add i64 0, 4"), "align_of u32 must be 4, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp29_06_array_len() {
+        // [T;N] .len() already works — verify it still does
+        let ir = compile_to_ir(r#"
+            fn f() -> u64 {
+                let arr: [u64; 4] = [1, 2, 3, 4];
+                return 4;
+            }
+        "#);
+        assert!(ir.contains("4 x i64"), "array type must appear in IR, got:
+{}", ir);
+    }
+
+    #[test]
+    fn tp29_07_option_none_inner_i64() {
+        // Option with no type arg defaults to i64
+        let ty = HirTy::Named("Option".to_string(), vec![]);
+        let s = emit_llvm_ty_owned(&ty);
+        assert_eq!(s, "{ i1, i64 }", "Option<> must default to {{ i1, i64 }}");
+    }
+
+    #[test]
+    fn tp29_08_mem_size_of_array() {
+        // size_of [u32; 4] = 16
+        let ir = compile_to_ir(r#"
+            fn f() -> u64 { return mem_size_of("[u32;4]"); }
+        "#);
+        assert!(ir.contains("add i64 0, 16"), "size_of [u32;4] must be 16, got:
+{}", ir);
+    }
+}
+
