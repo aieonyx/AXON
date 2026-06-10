@@ -523,7 +523,7 @@ impl LlvmEmitter {
                     let tmp = self.ssa.fresh_tmp();
                     // seL4_SysWait=7 — blocks until notification arrives, badge in x0
                     self.emit_line(&format!(
-                        "  {} = call i64 asm sideeffect \"mov x7, #7; svc #0\", \"{{{}}},r,~{{x7}},~{{memory}}\"(i64 {})",
+                        "  {} = call i64 asm sideeffect \"mov x7, #7; svc #0\", \"{{{}}},{{x0}},~{{x7}},~{{memory}}\"(i64 {})",
                         tmp, "={x0}", ep
                     ));
                     return Some(tmp);
@@ -535,7 +535,7 @@ impl LlvmEmitter {
                     let ep = av.first().cloned().unwrap_or_else(|| "0".to_string());
                     // seL4_SysNBSend=6 to notification object
                     self.emit_line(&format!(
-                        "  call void asm sideeffect \"mov x7, #6; svc #0\", \"r,~{{x7}},~{{memory}}\"(i64 {})",
+                        "  call void asm sideeffect \"mov x7, #6; svc #0\", \"{{x0}},~{{x7}},~{{memory}}\"(i64 {})",
                         ep
                     ));
                     return None;
@@ -548,7 +548,7 @@ impl LlvmEmitter {
                     let tmp = self.ssa.fresh_tmp();
                     // seL4_SysNBWait=8 — non-blocking poll
                     self.emit_line(&format!(
-                        "  {} = call i64 asm sideeffect \"mov x7, #8; svc #0\", \"{{{}}},r,~{{x7}},~{{memory}}\"(i64 {})",
+                        "  {} = call i64 asm sideeffect \"mov x7, #8; svc #0\", \"{{{}}},{{x0}},~{{x7}},~{{memory}}\"(i64 {})",
                         tmp, "={x0}", ep
                     ));
                     return Some(tmp);
