@@ -613,6 +613,57 @@ impl LlvmEmitter {
                     ));
                     return Some(tmp);
                 }
+                // P36: sel4_reply(msginfo: u64) — fast reply, no return
+                // seL4_SysReply=4, msginfo→x1
+                if fn_name == "sel4_reply" {
+                    let mut arg_vals: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { arg_vals.push(v); } }
+                    let msg = arg_vals.first().cloned().unwrap_or_else(|| "0".to_string());
+                    self.emit_line(&format!(
+                        "  call void asm sideeffect \"mov x7, #4; svc #0\", \"r,~{{x7}},~{{memory}}\"(i64 {})"
+                        , msg
+                    ));
+                    return None;
+                }
+                // P36: sel4_nb_send(ep: u64, msginfo: u64) — non-blocking send
+                // seL4_SysNBSend=6, ep→x0, msginfo→x1
+                if fn_name == "sel4_nb_send" {
+                    let mut arg_vals: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { arg_vals.push(v); } }
+                    let ep  = arg_vals.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let msg = arg_vals.get(1).cloned().unwrap_or_else(|| "0".to_string());
+                    self.emit_line(&format!(
+                        "  call void asm sideeffect \"mov x7, #6; svc #0\", \"r,r,~{{x7}},~{{memory}}\"(i64 {}, i64 {})"
+                        , ep, msg
+                    ));
+                    return None;
+                }
+                // P36: sel4_wait(ntfn: u64) -> u64 — block on notification, returns badge
+                // seL4_SysWait=7, ntfn→x0, badge returned in x1
+                if fn_name == "sel4_wait" {
+                    let mut arg_vals: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { arg_vals.push(v); } }
+                    let ntfn = arg_vals.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!(
+                        "  {} = call i64 asm sideeffect \"mov x7, #7; svc #0\", \"={{x1}},r,~{{x7}},~{{memory}}\"(i64 {})"
+                        , tmp, ntfn
+                    ));
+                    return Some(tmp);
+                }
+                // P36: sel4_poll(ntfn: u64) -> u64 — non-blocking notification check
+                // seL4_SysPoll=8, ntfn→x0, badge returned in x1 (0 if no message)
+                if fn_name == "sel4_poll" {
+                    let mut arg_vals: Vec<String> = Vec::new();
+                    for a in args { if let Some(v) = self.emit_expr(a) { arg_vals.push(v); } }
+                    let ntfn = arg_vals.first().cloned().unwrap_or_else(|| "0".to_string());
+                    let tmp = self.ssa.fresh_tmp();
+                    self.emit_line(&format!(
+                        "  {} = call i64 asm sideeffect \"mov x7, #8; svc #0\", \"={{x1}},r,~{{x7}},~{{memory}}\"(i64 {})"
+                        , tmp, ntfn
+                    ));
+                    return Some(tmp);
+                }
                 // P26-M1: volatile memory intrinsics — MMIO access
                 if fn_name == "read_volatile" {
                     let mut av: Vec<String> = Vec::new();
