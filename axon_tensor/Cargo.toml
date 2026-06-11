@@ -1,0 +1,21 @@
+[package]
+name = "axon_tensor"
+version = "0.1.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license = "Apache-2.0"
+description = "ONYX Framework — Tensor Engine (Phase 32)"
+repository = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_math    = { path = "../axon_math" }
+num-traits   = { version = "0.2", default-features = false, features = ["libm"] }
+libm         = { version = "0.2", default-features = false }
+
+[features]
+default  = []
+simd     = []           # enables LLVM SIMD intrinsic paths
+eddb     = []           # EdisonDB vector storage bridge (P32-M4)
+
+[dev-dependencies]
+# none — Kani runs via cargo kani, not cargo test
