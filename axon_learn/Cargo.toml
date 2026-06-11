@@ -1,0 +1,18 @@
+[package]
+name = "axon_learn"
+version = "0.1.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license = "Apache-2.0"
+description = "ONYX Framework — AI/ML Primitives (Phase 33)"
+repository = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_math   = { path = "../axon_math" }
+axon_tensor = { path = "../axon_tensor" }
+num-traits  = { version = "0.2", default-features = false, features = ["libm"] }
+libm        = { version = "0.2", default-features = false }
+
+[features]
+default = []
+eddb    = []    # EdisonDB training pipeline integration (P33-M4)
