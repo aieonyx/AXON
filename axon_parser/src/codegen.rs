@@ -65,10 +65,11 @@ pub fn emit_llvm_ty_owned(ty: &HirTy) -> String {
             let inner = args.first().map(emit_llvm_ty_owned).unwrap_or_else(|| "i64".to_string());
             format!("{{ i1, {} }}", inner)
         }
-        // P29-M1: Result<T,E> → { i1, T } (tag=1 Ok, tag=0 Err; error type elided)
+        // P35: Result<T,E> → { i1, T, E } (tag=1 Ok, tag=0 Err; E payload stored)
         HirTy::Named(n, args) if n == "Result" => {
-            let inner = args.first().map(emit_llvm_ty_owned).unwrap_or_else(|| "i64".to_string());
-            format!("{{ i1, {} }}", inner)
+            let ok_ty  = args.first().map(emit_llvm_ty_owned).unwrap_or_else(|| "i64".to_string());
+            let err_ty = args.get(1).map(emit_llvm_ty_owned).unwrap_or_else(|| "i64".to_string());
+            format!("{{ i1, {}, {} }}", ok_ty, err_ty)
         }
         _ => emit_llvm_ty(ty).to_string(),
     }
@@ -405,23 +406,30 @@ impl LlvmEmitter {
                 Some(tmp)
             }
             HirExprKind::Try(inner) => {
-                // P16-M3: expr? — evaluate inner; emit conditional early-return on Err
-                // Until Result ABI lands (P21), tag check is a no-op identity.
+                // P35: ? operator — extract i1 tag from { i1, T, E } at index 0
+                // tag=1 → Ok branch (continue); tag=0 → Err branch (early return)
                 let inner_val = self.emit_expr(inner)?;
-                let n = self.ssa.tmp_counter; self.ssa.tmp_counter += 4;
-                let tag     = format!("%try_tag_{}", n);
-                let err_lbl = format!("try_err_{}", n);
-                let ok_lbl  = format!("try_ok_{}", n);
+                let n = self.ssa.tmp_counter; self.ssa.tmp_counter += 5;
+                let tag      = format!("%try_tag_{}", n);
+                let ok_val   = format!("%try_ok_{}", n);
+                let err_val  = format!("%try_err_{}", n);
+                let err_lbl  = format!("try_err_{}", n);
+                let ok_lbl   = format!("try_ok_{}", n);
                 let cont_lbl = format!("try_cont_{}", n);
-                self.emit_line(&format!("  {} = and i32 {}, 0", tag, inner_val));
-                self.emit_line(&format!("  %try_cond_{} = icmp ne i32 {}, 0", n, tag));
-                self.emit_line(&format!("  br i1 %try_cond_{}, label %{}, label %{}", n, err_lbl, ok_lbl));
+                // Extract discriminant tag (field 0)
+                let result_ty = emit_llvm_ty(&inner.ty).to_string();
+                self.emit_line(&format!("  {} = extractvalue {} {}, 0", tag, result_ty, inner_val));
+                self.emit_line(&format!("  br i1 {}, label %{}, label %{}", tag, ok_lbl, err_lbl));
+                // Err branch: extract E payload (field 2) and return it
                 self.emit_line(&format!("{}:", err_lbl));
-                self.emit_line(&format!("  ret i32 {}", inner_val));
+                self.emit_line(&format!("  {} = extractvalue {} {}, 2", err_val, result_ty, inner_val));
+                self.emit_line(&format!("  ret i64 {}", err_val));
+                // Ok branch: extract T payload (field 1) and continue
                 self.emit_line(&format!("{}:", ok_lbl));
+                self.emit_line(&format!("  {} = extractvalue {} {}, 1", ok_val, result_ty, inner_val));
                 self.emit_line(&format!("  br label %{}", cont_lbl));
                 self.emit_line(&format!("{}:", cont_lbl));
-                Some(inner_val)
+                Some(ok_val)
             }
             HirExprKind::Return(val) => {
                 if let Some(v) = val {
