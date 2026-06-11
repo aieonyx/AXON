@@ -1925,7 +1925,7 @@ mod p29_core_tests {
     fn tp29_02_result_ty_owned() {
         let ty = HirTy::Named("Result".to_string(), vec![HirTy::U64, HirTy::I32]);
         let s = emit_llvm_ty_owned(&ty);
-        assert_eq!(s, "{ i1, i64 }", "Result<u64,i32> must map to {{ i1, i64 }}, got: {}", s);
+        assert_eq!(s, "{ i1, i64, i32 }", "Result<u64,i32> must map to {{ i1, i64, i32 }}, got: {}", s);
     }
 
     #[test]

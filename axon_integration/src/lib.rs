@@ -12,3 +12,4 @@
 #[cfg(test)] mod test_ai;
 #[cfg(test)] mod test_pipeline;
 #[cfg(test)] mod test_sel4_asm; // P23-M5: seL4 syscall roundtrip
+#[cfg(test)] mod test_result_payload; // P35: Result<T,E> error payload
