@@ -1,0 +1,10 @@
+[package]
+name        = "axon_sel4"
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+description = "AXON seL4 syscall wrappers — sovereign IPC and capability operations"
+repository  = "https://github.com/aieonyx/AXON"
+
+[dependencies]
