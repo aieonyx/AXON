@@ -1,0 +1,23 @@
+[package]
+name = "axon_compute"
+version = "0.1.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license = "Apache-2.0"
+description = "ONYX Framework — GPU Dispatch + Distributed Compute (Phase 34)"
+repository = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_math   = { path = "../axon_math" }
+axon_tensor = { path = "../axon_tensor" }
+axon_learn  = { path = "../axon_learn" }
+num-traits  = { version = "0.2", default-features = false, features = ["libm"] }
+libm        = { version = "0.2", default-features = false }
+
+[features]
+default  = []
+cuda     = []    # CUDA kernel dispatch (requires CUDA runtime)
+rocm     = []    # ROCm kernel dispatch (requires ROCm runtime)
+awp_mesh = []    # AWP distributed mesh compute
+bastion  = []    # BASTION node orchestration
+eddb     = []    # EdisonDB model weight storage
