@@ -20,3 +20,4 @@ axon_parser = { path = "../axon_parser" }
 axon_fs = { path = "../axon_fs" }
 axon_sel4 = { path = "../axon_sel4" }
 axon_genesis = { path = "../axon_genesis" }
+axon_drivers = { path = "../axon_drivers" }

@@ -4,6 +4,7 @@ members = [
     "axon_core",
     "axon_fs",
     "axon_genesis",
+    "axon_drivers",
     "axon_alloc",
     "axon_pal",
     "axon_pal_linux",
