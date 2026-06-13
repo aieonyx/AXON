@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/axon-banner.png" alt="AXON Banner">
+  <img src="assets/axon_bannerF.png" alt="AXON Banner">
 </p>
 
 # AXON — Sovereign Systems Programming Language
