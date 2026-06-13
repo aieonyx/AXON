@@ -12,6 +12,8 @@ readme = "README.md"
 
 [features]
 default = []
+# Enable to register SovereignAllocator as #[global_allocator]
+sovereign_global = []
 
 [dependencies]
 axon_core  = { path = "../axon_core" }
