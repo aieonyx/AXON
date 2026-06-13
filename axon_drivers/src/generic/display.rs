@@ -74,6 +74,8 @@ impl StubDisplay {
     }
 
     pub fn pixel_at(&self, x: u32, y: u32) -> Colour {
+        debug_assert!(x < self.mode.width, "x out of bounds");
+        debug_assert!(y < self.mode.height, "y out of bounds");
         let off = (y * self.mode.stride + x * 3) as usize;
         Colour { r: self.buffer[off], g: self.buffer[off+1], b: self.buffer[off+2] }
     }

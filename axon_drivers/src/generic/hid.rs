@@ -75,6 +75,7 @@ pub trait HidDriver {
 
 /// Parse a keyboard HID report into a KeyEvent.
 pub fn parse_keyboard_report(report: &HidReport) -> KeyEvent {
+    if report.len < 8 { return KeyEvent { modifiers: 0, keycodes: [KeyCode::NONE; 6] }; }
     KeyEvent {
         modifiers: report.data[0],
         keycodes: [
@@ -90,6 +91,7 @@ pub fn parse_keyboard_report(report: &HidReport) -> KeyEvent {
 
 /// Parse a mouse HID report into a MouseEvent.
 pub fn parse_mouse_report(report: &HidReport) -> MouseEvent {
+    if report.len < 4 { return MouseEvent { buttons: 0, dx: 0, dy: 0, scroll: 0 }; }
     MouseEvent {
         buttons: report.data[0],
         dx:      report.data[1] as i8,

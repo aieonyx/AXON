@@ -28,13 +28,15 @@ pub struct EtherFrame {
     pub src:      MacAddr,
     pub ethertype: u16,
     pub payload:  [u8; MAX_FRAME_SIZE],
-    pub payload_len: usize,
+    payload_len: usize,
 }
 
 impl EtherFrame {
     pub fn new(dst: MacAddr, src: MacAddr, ethertype: u16) -> Self {
         Self { dst, src, ethertype, payload: [0u8; MAX_FRAME_SIZE], payload_len: 0 }
     }
+    pub fn set_payload_len(&mut self, len: usize) { self.payload_len = len.min(MAX_FRAME_SIZE); }
+    pub fn payload_len(&self) -> usize { self.payload_len }
     pub fn total_len(&self) -> usize { 14 + self.payload_len }
 }
 
