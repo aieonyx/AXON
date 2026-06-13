@@ -2586,6 +2586,107 @@ fn main() -> i32 {
         println!("SUCCESS: for x in 0..5 executed correctly");
     }
 
+    // ── Phase 36 Benchmarks ──────────────────────────────────────────────────
+
+    #[test]
+    #[ignore]
+    fn bench_ir_emission_rate_1000x() {
+        use std::time::Instant;
+        let programs: &[(&str, &str)] = &[
+            ("simple",     "fn main() -> i32 { return 42; }"),
+            ("arithmetic", "fn main() -> i32 { let a: i32 = 100; let b: i32 = 200; let c = a + b; return c; }"),
+            ("functions",  "fn add(x: i32, y: i32) -> i32 { return x + y; } fn main() -> i32 { return add(20, 22); }"),
+        ];
+        let runs = 1000u32;
+        println!("\n╔══════════════════════════════════════════════════════════╗");
+        println!("║  AXON IR Emission Rate — Phase 36                        ║");
+        println!("║  Pipeline: parse → HIR → emit_ir (no llc/clang)         ║");
+        println!("║  Machine:  Pop OS, AMD Ryzen 7, ~32GB RAM                ║");
+        println!("╠══════════════════════════════════════════════════════════╣");
+        for (name, src) in programs {
+            let t = Instant::now();
+            for _ in 0..runs {
+                let _ = emit_src(src);
+            }
+            let elapsed = t.elapsed();
+            let per_us = elapsed.as_micros() / runs as u128;
+            let rate = 1_000_000u128 / per_us.max(1);
+            println!("║  {:<12} : {:>5}µs/compile   {:>6} compiles/sec       ║",
+                name, per_us, rate);
+        }
+        println!("╚══════════════════════════════════════════════════════════╝");
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_full_pipeline_e2e() {
+        use std::time::Instant;
+        let programs: &[(&str, &str, i32)] = &[
+            ("simple",     "fn main() -> i32 { return 42; }",                                                            42),
+            ("arithmetic", "fn main() -> i32 { let a: i32 = 20; let b: i32 = 22; return a + b; }",                      42),
+            ("functions",  "fn add(x: i32, y: i32) -> i32 { return x + y; } fn main() -> i32 { return add(20, 22); }", 42),
+        ];
+        println!("\n╔══════════════════════════════════════════════════════════╗");
+        println!("║  AXON Full Pipeline Benchmark — Phase 36                 ║");
+        println!("║  Pipeline: parse → HIR → LLVM IR → llc-18 → clang       ║");
+        println!("║  Machine:  Pop OS, AMD Ryzen 7, ~32GB RAM                ║");
+        println!("╠══════════════════════════════════════════════════════════╣");
+        for (name, src, expected) in programs {
+            let runs = 5u32;
+            let mut total_ms = 0f64;
+            for _ in 0..runs {
+                let t = Instant::now();
+                let ir = emit_src(src);
+                let obj = ir_to_object(&ir, "/tmp").expect("ir_to_object failed");
+                object_to_binary(&obj, &format!("/tmp/axon_bench_{}", name))
+                    .expect("object_to_binary failed");
+                total_ms += t.elapsed().as_secs_f64() * 1000.0;
+            }
+            let avg_ms = total_ms / runs as f64;
+            // Run binary and verify exit code
+            let code = std::process::Command::new(format!("/tmp/axon_bench_{}", name))
+                .status().expect("run failed").code().unwrap_or(-1);
+            let ok = if code == *expected { "✅" } else { "❌" };
+            println!("║  {:<12} : {:>6.1}ms avg  exit={:<3} {} ({} runs)      ║",
+                name, avg_ms, code, ok, runs);
+        }
+        println!("╚══════════════════════════════════════════════════════════╝");
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_compiler_throughput_summary() {
+        use std::time::Instant;
+        // High-iteration IR emission rate — the number for README
+        let src = "fn main() -> i32 { let a: i32 = 20; let b: i32 = 22; return a + b; }";
+        let runs = 5000u32;
+        let t = Instant::now();
+        for _ in 0..runs {
+            let _ = emit_src(src);
+        }
+        let elapsed = t.elapsed();
+        let per_us  = elapsed.as_micros() / runs as u128;
+        let rate    = 1_000_000u128 / per_us.max(1);
+        // Full pipeline timing (single run)
+        let t2 = Instant::now();
+        let ir  = emit_src(src);
+        let obj = ir_to_object(&ir, "/tmp").expect("compile failed");
+        object_to_binary(&obj, "/tmp/axon_bench_summary").expect("link failed");
+        let full_ms = t2.elapsed().as_secs_f64() * 1000.0;
+        println!("\n╔══════════════════════════════════════════════════════════╗");
+        println!("║  AXON Compiler — Phase 36 Benchmark Summary              ║");
+        println!("╠══════════════════════════════════════════════════════════╣");
+        println!("║  IR emission rate  : {:>6} compiles/sec ({} runs)    ║", rate, runs);
+        println!("║  IR emission/compile: {:>4}µs                             ║", per_us);
+        println!("║  Full pipeline     : {:>6.1}ms (IR+llc-18+clang)         ║", full_ms);
+        println!("║  Machine           : Pop OS, AMD Ryzen 7, ~32GB RAM      ║");
+        println!("║  LLVM              : 18                                   ║");
+        println!("╚══════════════════════════════════════════════════════════╝");
+        // Sanity gate
+        assert!(per_us < 100_000, "IR emission too slow: {}µs", per_us);
+        assert!(full_ms < 10_000.0, "Full pipeline too slow: {}ms", full_ms);
+    }
+
 }
 
 // P12-M4-APPLIED
