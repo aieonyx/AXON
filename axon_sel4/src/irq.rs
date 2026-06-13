@@ -76,7 +76,11 @@ pub fn irq_register(
         if err != 0 { return Err(IrqError::SeL4Error(err)); }
         // Step 2: IRQHandler_SetNotification — bind to notification
         let err = irq_handler_set_notification(dest_slot, notification);
-        if err != 0 { return Err(IrqError::BindFailed); }
+        if err != 0 {
+            // Clean up orphaned cap to prevent seL4 capability leak
+            let _ = irq_handler_clear(dest_slot);
+            return Err(IrqError::BindFailed);
+        }
     }
     Ok(IrqHandler { cap: dest_slot, irq_num, notification })
 }
