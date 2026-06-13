@@ -58,7 +58,7 @@ impl PalGpio for LinuxHwPal {
 
 // ── Timer — backed by std::time on Linux ─────────────────────────────────────
 
-/// Linux timer epoch — first call to timer_ticks() sets this.
+/// Linux timer epoch — set exactly once on first call via compare_exchange.
 static TIMER_START: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 extern "C" {
@@ -72,18 +72,25 @@ const CLOCK_MONOTONIC: i32 = 1;
 
 fn monotonic_ns() -> u64 {
     let mut ts = TimeSpec { tv_sec: 0, tv_nsec: 0 };
-    unsafe { clock_gettime(CLOCK_MONOTONIC, &mut ts); }
+    // Fix: check clock_gettime return value — failure leaves ts zeroed.
+    let ret = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut ts) };
+    debug_assert_eq!(ret, 0, "clock_gettime failed");
     ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
 }
 
 impl PalTimer for LinuxHwPal {
     fn timer_ticks() -> AxonResult<TimerTicks> {
         let now = monotonic_ns();
-        let start = TIMER_START.load(core::sync::atomic::Ordering::Relaxed);
-        if start == 0 {
-            TIMER_START.store(now, core::sync::atomic::Ordering::Relaxed);
-            return AxonResult::Ok(TimerTicks(0));
-        }
+        // Fix: use compare_exchange to set start exactly once — safe under concurrency.
+        let result = TIMER_START.compare_exchange(
+            0, now,
+            core::sync::atomic::Ordering::AcqRel,
+            core::sync::atomic::Ordering::Acquire,
+        );
+        let start = match result {
+            Ok(_)  => now,   // we set it — elapsed is 0
+            Err(s) => s,     // already set — use existing epoch
+        };
         AxonResult::Ok(TimerTicks(now.saturating_sub(start)))
     }
     fn timer_freq_hz() -> u64 { 1_000_000_000 } // nanosecond resolution
