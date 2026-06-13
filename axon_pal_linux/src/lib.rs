@@ -8,3 +8,4 @@ mod process;
 mod sync;
 mod time;
 pub struct LinuxPal;
+pub mod hw;
