@@ -78,19 +78,28 @@ impl Default for SovereignAllocator {
 
 unsafe impl GlobalAlloc for SovereignAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let size = layout.size();
-        // Route to smallest fitting slab class first.
-        if size <= 8   { let p = self.slab8.alloc();   if !p.is_null() { return p; } }
-        if size <= 16  { let p = self.slab16.alloc();  if !p.is_null() { return p; } }
-        if size <= 32  { let p = self.slab32.alloc();  if !p.is_null() { return p; } }
-        if size <= 64  { let p = self.slab64.alloc();  if !p.is_null() { return p; } }
-        if size <= 128 { let p = self.slab128.alloc(); if !p.is_null() { return p; } }
-        if size <= 256 { let p = self.slab256.alloc(); if !p.is_null() { return p; } }
-        // Fallback: heap for large or slab-exhausted allocations.
-        unsafe { self.heap.alloc(size, layout.align()) }
+        let size  = layout.size();
+        let align = layout.align();
+        // Handle zero-size allocations — return dangling non-null pointer.
+        if size == 0 {
+            return align as *mut u8;
+        }
+        // Only route to slab if alignment is satisfiable (slab guarantees align(8)).
+        if align <= 8 {
+            if size <= 8   { let p = self.slab8.alloc();   if !p.is_null() { return p; } }
+            if size <= 16  { let p = self.slab16.alloc();  if !p.is_null() { return p; } }
+            if size <= 32  { let p = self.slab32.alloc();  if !p.is_null() { return p; } }
+            if size <= 64  { let p = self.slab64.alloc();  if !p.is_null() { return p; } }
+            if size <= 128 { let p = self.slab128.alloc(); if !p.is_null() { return p; } }
+            if size <= 256 { let p = self.slab256.alloc(); if !p.is_null() { return p; } }
+        }
+        // Fallback: heap for large, slab-exhausted, or over-aligned allocations.
+        unsafe { self.heap.alloc(size, align) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // Zero-size allocations use dangling pointer — nothing to free.
+        if layout.size() == 0 { return; }
         // Route dealloc to owning slab or heap.
         if self.slab8.owns(ptr)   { unsafe { self.slab8.dealloc(ptr);   return; } }
         if self.slab16.owns(ptr)  { unsafe { self.slab16.dealloc(ptr);  return; } }
