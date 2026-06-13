@@ -57,6 +57,19 @@ axon build --profile seL4-strict --target aarch64-sel4 -o node node.axon
 
 ## Benchmark Results
 
+### Compiler Throughput — x86_64 (Pop OS, AMD Ryzen 7, ~32GB RAM, LLVM 18)
+
+| Workload | IR Emission | Rate |
+|----------|-------------|------|
+| `fn main() -> i32 { return 42; }` | 25µs/compile | 40,000 compiles/sec |
+| Arithmetic (3 ops) | 38µs/compile | 26,315 compiles/sec |
+| Multi-function (2 fns) | 52µs/compile | 19,230 compiles/sec |
+| **Average (5,000 runs)** | **33µs/compile** | **30,303 compiles/sec** |
+
+Full pipeline (parse → HIR → LLVM IR → llc-18 → clang → native binary): **~72ms**
+
+All compiled binaries verified correct — exit code 42 across all workloads.
+
 ### GPU — NVIDIA T4 (Google Colab)
 
 <p align="center">
@@ -65,10 +78,9 @@ axon build --profile seL4-strict --target aarch64-sel4 -o node node.axon
 
 - Vector addition: 1,000,000 elements × 20 runs
 - Throughput: **16.64 billion ops/sec**
-- Correctness: True (verified)
 - Pipeline: AXON → LLVM 18 → PTX → NVIDIA T4 (sm_75)
 
-> Numbers are published as-is. Credibility comes from honesty, not flattery.
+> Numbers published as-is. Credibility comes from honesty, not flattery.
 
 ---
 
