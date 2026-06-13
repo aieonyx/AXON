@@ -1,0 +1,14 @@
+[package]
+name        = "axon_genesis"
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+description = "GENESIS — AXON seL4 root task: capability bootstrap and sovereignty enforcement"
+repository  = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_core  = { path = "../axon_core" }
+axon_sel4  = { path = "../axon_sel4" }
+axon_alloc = { path = "../axon_alloc" }
+axon_fs    = { path = "../axon_fs" }

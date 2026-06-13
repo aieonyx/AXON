@@ -19,7 +19,7 @@ pub struct AxfsHandle {
 }
 
 impl AxfsHandle {
-    pub fn is_valid(self) -> bool { !self.fd.is_invalid() }
+    pub fn is_valid(&self) -> bool { !self.fd.is_invalid() }
 }
 
 /// AXFS sovereign file system — generic over any PalFs backend.
