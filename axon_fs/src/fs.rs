@@ -11,7 +11,7 @@ use crate::tier::DataTier;
 use crate::policy::{AxfsPolicy, PolicyDecision};
 
 /// An open AXFS file handle — wraps RawFd with tier metadata.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct AxfsHandle {
     pub fd:    RawFd,
     pub tier:  DataTier,
@@ -63,13 +63,27 @@ impl<P: PalFs> Axfs<P> {
         P::mkdir(path, mode)
     }
 
-    /// Remove a file or directory.
+    /// Remove a file or directory — policy-gated on tier.
     pub fn remove(path: &AxonPath) -> AxonResult<()> {
+        let tier = DataTier::from_path(path.as_str());
+        // Critical files require explicit capability to delete.
+        let decision = axon_try!(AxfsPolicy::check_open(tier, OpenFlags::WRITE));
+        if let PolicyDecision::Deny(reason) = decision {
+            return AxonResult::Err(AxonError::permission_denied(reason));
+        }
         P::remove(path)
     }
 
-    /// Rename/move a path.
+    /// Rename/move a path — policy-gated on source and destination tier.
     pub fn rename(from: &AxonPath, to: &AxonPath) -> AxonResult<()> {
+        // Gate on both source and destination tier.
+        for path in &[from, to] {
+            let tier = DataTier::from_path(path.as_str());
+            let decision = axon_try!(AxfsPolicy::check_open(tier, OpenFlags::WRITE));
+            if let PolicyDecision::Deny(reason) = decision {
+                return AxonResult::Err(AxonError::permission_denied(reason));
+            }
+        }
         P::rename(from, to)
     }
 
