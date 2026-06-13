@@ -12,7 +12,7 @@ use axon_core::prelude::*;
 pub enum HidDeviceType { Keyboard, Mouse, Gamepad }
 
 /// A single HID input report — raw bytes from the device.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HidReport {
     pub device: HidDeviceType,
     pub data:   [u8; 8],
