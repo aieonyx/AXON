@@ -19,7 +19,8 @@ fn p40_axfs_open_noise_write_allowed() {
     let path = AxonPath::new("/tmp/axon_axfs_test_noise.txt");
     let h = AxfsLinux::open(&path, OpenFlags::WRITE.or(OpenFlags::CREATE).or(OpenFlags::TRUNCATE)).unwrap();
     assert!(h.is_valid());
-    assert_eq!(h.tier, DataTier::Noise);
+    let tier = h.tier;
+    assert_eq!(tier, DataTier::Noise);
     AxfsLinux::close(h).unwrap();
     AxfsLinux::remove(&path).unwrap();
 }
