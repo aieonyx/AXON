@@ -17,3 +17,5 @@ libc             = "0.2"
 
 [dev-dependencies]
 axon_parser = { path = "../axon_parser" }
+axon_fs = { path = "../axon_fs" }
+axon_sel4 = { path = "../axon_sel4" }

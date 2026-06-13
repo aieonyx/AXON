@@ -1,0 +1,15 @@
+[package]
+name        = "axon_fs"
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+description = "AXFS — sovereign file system layer with data tier enforcement"
+repository  = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_core = { path = "../axon_core" }
+axon_pal  = { path = "../axon_pal" }
+
+[dev-dependencies]
+axon_pal_linux = { path = "../axon_pal_linux" }
