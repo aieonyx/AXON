@@ -97,7 +97,7 @@ pub fn genesis_main(bootinfo: BootInfo) -> AxonResult<GenesisState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bootinfo::BootInfo;
+    use crate::bootinfo::{BootInfo, CapRange, UntypedRegion};
 
     fn make_bootinfo() -> BootInfo {
         let mut bi = BootInfo::new(CapRange { start: 10, end: 256 }, 0x1000_0000);
