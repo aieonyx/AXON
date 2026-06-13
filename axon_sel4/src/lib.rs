@@ -10,3 +10,4 @@ pub mod ipc;
 pub mod cap;
 pub mod mem;
 pub mod types;
+pub mod irq;
