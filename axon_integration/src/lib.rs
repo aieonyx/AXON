@@ -16,3 +16,4 @@
 #[cfg(test)] mod test_alloc_sovereign; // P37: sovereign heap allocator
 #[cfg(test)] mod test_irq; // P38: IRQ dispatch layer
 #[cfg(test)] mod test_driver_pal; // P39: driver PAL
+#[cfg(test)] mod test_axfs; // P40: AXFS sovereign file system
