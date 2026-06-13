@@ -20,3 +20,4 @@
 #[cfg(test)] mod test_genesis; // P41: GENESIS root task
 #[cfg(test)] mod test_boot; // P42: live aarch64-seL4 boot
 #[cfg(test)] mod test_drivers; // P43: Phoenix generic drivers
+#[cfg(test)] mod test_sovereign_drivers; // P44: sovereign driver stack

@@ -10,3 +10,4 @@ repository  = "https://github.com/aieonyx/AXON"
 [dependencies]
 axon_core = { path = "../axon_core" }
 axon_pal  = { path = "../axon_pal" }
+axon_sel4 = { path = "../axon_sel4" }
