@@ -10,3 +10,6 @@ pub use net::PalNet;
 pub use process::PalProcess;
 pub use sync::PalSync;
 pub use time::PalTime;
+
+pub mod hw;
+pub use hw::{PalUart, PalGpio, PalTimer, UartConfig, BaudRate, GpioDirection, GpioState, TimerTicks};

@@ -15,3 +15,4 @@
 #[cfg(test)] mod test_result_payload; // P35: Result<T,E> error payload
 #[cfg(test)] mod test_alloc_sovereign; // P37: sovereign heap allocator
 #[cfg(test)] mod test_irq; // P38: IRQ dispatch layer
+#[cfg(test)] mod test_driver_pal; // P39: driver PAL
