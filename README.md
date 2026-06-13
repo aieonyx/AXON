@@ -152,9 +152,11 @@ axon build --profile dev-mode program.axon           # BASTION will reject
 
 ## Compiler Architecture
 
-**430+ tests. 0 failures. Clippy clean.**
+**600+ tests. 0 failures. Clippy clean.**
 
 Full pipeline: Lexer → Parser → HIR → HM Type Inference → LLVM 18 → Native binary / PTX / aarch64-seL4 ELF
+
+Live boot confirmed: AXON compiles, boots on QEMU aarch64-seL4, `axon_main()` returns 42.
 
 Kani-verified core (`axon_verify_core`): 17 harnesses, 0 failures — constitutional verification kernel.
 
@@ -189,40 +191,12 @@ Kani-verified core (`axon_verify_core`): 17 harnesses, 0 failures — constituti
 | 34 | axon_compute — GPU dispatch, AWP mesh, ONYX checkpoint | ✅ |
 | 35 | Result<T,E> error payload — E type stored, ? operator fixed | ✅ |
 | 36 | aarch64-seL4 asm! intrinsics — sel4_reply/wait/poll/nb_send | ✅ |
-| 37 | axon_alloc — sovereign heap allocator | 🔜 |
-| 38 | IRQ dispatch layer | 🔜 |
-| 39 | Driver PAL — UART, GPIO, timer | 🔜 |
-| 40 | AXFS — sovereign file system layer | 🔜 |
-| 41 | GENESIS root task | 🔜 |
-| 42 | Live aarch64-seL4 boot | 🔜 |
-| 43–44 | Phoenix generic drivers | 🔜 |
+| 37 | axon_alloc — sovereign heap allocator (slab + buddy) | ✅ |
+| 38 | IRQ dispatch layer — seL4 IRQ caps, handler registration | ✅ |
+| 39 | Driver PAL — UART, GPIO, Timer traits + Linux host impl | ✅ |
+| 40 | AXFS — sovereign file system layer (DataTier, AxfsPolicy) | ✅ |
+| 41 | GENESIS root task — BootInfo, CapabilityBroker CB-01–CB-10 | ✅ |
+| 42 | **Live aarch64-seL4 boot — AXON boots on QEMU, axon_main() = 42** | ✅ |
+| 43 | Phoenix generic drivers — USB HID, CDC-ECM, HDA, VESA/GOP, Mass Storage | ✅ |
+| 44 | axon_drivers::sovereign — PD isolation, device registry, AWP discovery | ✅ |
 
----
-
-## Building
-
-```bash
-git clone https://github.com/aieonyx/axon
-cd axon
-cargo install --path axon_cli
-axon version
-```
-
----
-
-## License
-
-Apache 2.0 — permanently and irrevocably.
-Community Promise II: the core will never become proprietary.
-
-## Author
-
-Edison Lepiten — solo founder, AIEONYX
-Built after work hours in Prague, Czech Republic.
-For ordinary people. Not corporations.
-
----
-
-*AIEONYX: github.com/aieonyx*
-*NLNet NGI Zero grant application submitted May 2026*
-*CS Contributions Registry: 46 formally named terms — arXiv submission in preparation*
