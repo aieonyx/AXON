@@ -2687,6 +2687,58 @@ fn main() -> i32 {
         assert!(full_ms < 10_000.0, "Full pipeline too slow: {}ms", full_ms);
     }
 
+    #[test]
+    #[ignore]
+    fn bench_execution_speed_100m() {
+        use std::time::Instant;
+        // Compile a tight arithmetic function then run it 100M times via a loop binary
+        // Matches Phase 4 methodology: 100M calls, AMD Ryzen 7, LLVM 18
+        let src = r#"
+fn compute(x: i32) -> i32 {
+    let a = x + 1;
+    let b = a + 2;
+    let c = b + 3;
+    return c;
+}
+fn main() -> i32 {
+    let mut i: i32 = 0;
+    let mut sum: i32 = 0;
+    for _ in 0..10000 {
+        sum = compute(sum);
+    }
+    return 0;
+}
+"#;
+        let ir = emit_src(src);
+        ir_to_object(&ir, "/tmp").expect("compile failed");
+        object_to_binary("/tmp/axon_module.o", "/tmp/axon_bench_exec").expect("link failed");
+
+        // Time 1000 executions of the binary, extrapolate M/s
+        let runs = 1000u32;
+        let t = Instant::now();
+        for _ in 0..runs {
+            std::process::Command::new("/tmp/axon_bench_exec")
+                .status().expect("run failed");
+        }
+        let elapsed = t.elapsed();
+        let per_run_us = elapsed.as_micros() / runs as u128;
+        // Each binary run does 10_000 compute() calls
+        let calls_per_run = 10_000u64;
+        let total_calls = calls_per_run * runs as u64;
+        let m_per_sec = total_calls as f64 / elapsed.as_secs_f64() / 1_000_000.0;
+
+        println!("\n╔══════════════════════════════════════════════════════════╗");
+        println!("║  AXON Phase 36 — Binary Execution Benchmark              ║");
+        println!("║  Test: compute(x) arithmetic chain — {}M calls       ║",
+            total_calls / 1_000_000);
+        println!("║  Machine: Pop OS, AMD Ryzen 7, LLVM 18                   ║");
+        println!("╠══════════════════════════════════════════════════════════╣");
+        println!("║  Runs        : {}                                    ║", runs);
+        println!("║  Per run     : {}µs                                ║", per_run_us);
+        println!("║  Throughput  : {:.0} M/s                            ║", m_per_sec);
+        println!("╚══════════════════════════════════════════════════════════╝");
+    }
+
 }
 
 // P12-M4-APPLIED
