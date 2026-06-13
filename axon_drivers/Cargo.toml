@@ -1,0 +1,12 @@
+[package]
+name        = "axon_drivers"
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+license     = "Apache-2.0"
+description = "Phoenix generic drivers — USB HID, CDC-ECM, HDA, VESA/GOP, Mass Storage"
+repository  = "https://github.com/aieonyx/AXON"
+
+[dependencies]
+axon_core = { path = "../axon_core" }
+axon_pal  = { path = "../axon_pal" }

@@ -19,3 +19,4 @@
 #[cfg(test)] mod test_axfs; // P40: AXFS sovereign file system
 #[cfg(test)] mod test_genesis; // P41: GENESIS root task
 #[cfg(test)] mod test_boot; // P42: live aarch64-seL4 boot
+#[cfg(test)] mod test_drivers; // P43: Phoenix generic drivers
