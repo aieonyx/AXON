@@ -6,7 +6,7 @@
 
 > *"We are not users. We are not accounts. We are not products. We are people."*
 
-**AIEONYX AXON is the world's first sovereign systems programming language — unifying compiler-enforced deployment profiles, formal contracts, AI-assisted verification, and CPU/GPU execution for seL4-oriented infrastructure.**
+**AAIEONYX AXON is the world's first sovereign systems programming language. It combines compiler-enforced deployment profiles, formal contracts, AI-assisted verification, and CPU/GPU execution for seL4-oriented infrastructure.**
 
 Built for the [AIEONYX](https://github.com/aieonyx) platform. Rust-like memory safety, zero GC, built-in formal contracts, and sovereign capability profiles enforced at compile time.
 
@@ -17,15 +17,15 @@ Built for the [AIEONYX](https://github.com/aieonyx) platform. Rust-like memory s
 
 ## What is Novel
 
-The genuinely new idea is the *placement*: a local AI verifier as a mandatory compiler phase that can reject programs — running fully offline, zero cloud.
+The genuinely new idea is the placement: a local AI verifier as a mandatory compiler phase that can reject programs. It runs fully offline, with no cloud.
 
-Editor-side assistants (Copilot etc.) suggest; they do not gate. Dafny/Verus/SPARK have machine-checked contracts but no natural-language intent layer. AXON combines both: `@ensures` discharged by a sound checker (Kani-verified core), with `@ai.intent` as a natural-language contract layer — the first systems language where local LLM intent-verification is a compilation phase targeting seL4.
+Editor-side assistants, like Copilot, suggest but do not gate. Dafny, Verus, and SPARK have machine-checked contracts but lack a natural-language intent layer. AXON combines both features: @ensures is discharged by a sound checker (Kani-verified core), with @ai.intent as a natural-language contract layer. It is the first systems language where local LLM intent verification is a compilation phase targeting seL4.
 
-The defensible combination no other language ships today:
+  This defensible combination is not available in any other language today:
 - Memory safety + Python-readable syntax
 - `@ai.intent` / `@ensures` / `@requires` as compiler gates (not editor hints)
 - seL4-native target — designed for it, not retrofitted
-- Zero cloud dependency — sovereignty is structural, not a setting
+- Zero cloud dependency; sovereignty is structural, not a setting
 - CPU + GPU (PTX) + aarch64-seL4 bare metal from one toolchain
 
 ---
