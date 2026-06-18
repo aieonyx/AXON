@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "axon_awp_ffi",
     "axon_core",
     "axon_fs",
     "axon_genesis",
