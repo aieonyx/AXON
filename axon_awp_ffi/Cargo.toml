@@ -1,0 +1,21 @@
+[package]
+name = "axon_awp_ffi"
+version = "0.1.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "AXON AWP verifier FFI bridge — sovereign packet verification for Onyxia"
+license = "Apache-2.0"
+
+# Produces both a Rust library and a C-compatible dynamic library
+[lib]
+name = "axon_awp_ffi"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+# axon-live: replace stub verifier with real P45 AWP mesh verifier
+axon-live = []
+
+[dependencies]
+
+[dev-dependencies]
