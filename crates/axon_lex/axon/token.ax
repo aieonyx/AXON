@@ -1,0 +1,69 @@
+// token.ax -- AXONYX token definitions
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Sovereign source-of-truth for all AXONYX tokens.
+// The Rust token.rs mirrors this file exactly.
+// The TextMate grammar for GitHub Linguist is derived from these definitions.
+
+enum Token {
+    // Literals
+    IntLit(i64),
+    FloatLit(f64),
+    StringLit(str),
+    BoolLit(bool),
+
+    // Identifiers
+    Ident(str),
+
+    // Core keywords
+    Fn, Let, Mut, If, Else, While, For, Return, Match,
+    Struct, Enum, Impl, Pub, Use, Mod, Type, Const, Static, Nil,
+
+    // Sovereign keywords -- AIEONYX extensions
+    Sovereign, Capability, Seal, Domain,
+
+    // Arithmetic operators
+    Plus, Minus, Star, Slash, Percent,
+
+    // Comparison operators
+    Eq, EqEq, Bang, BangEq, Lt, LtEq, Gt, GtEq,
+
+    // Logical operators
+    And, AndAnd, Pipe, PipePipe,
+
+    // Punctuation
+    Arrow, FatArrow, Dot, DotDot,
+    Colon, ColonColon, Semi, Comma,
+
+    // Delimiters
+    LParen, RParen, LBrace, RBrace, LBracket, RBracket,
+
+    // Special
+    Comment(str),
+    Whitespace,
+    Newline,
+    Eof,
+    Unknown(char),
+}
+
+// Trivia tokens are present in the stream but skipped by the parser.
+fn token_is_trivia(tok: &Token) -> bool {
+    match tok {
+        Token::Whitespace  => true,
+        Token::Newline     => true,
+        Token::Comment(_)  => true,
+        _                  => false,
+    }
+}
+
+// Returns true if this is a sovereign AIEONYX keyword.
+fn token_is_sovereign(tok: &Token) -> bool {
+    match tok {
+        Token::Sovereign   => true,
+        Token::Capability  => true,
+        Token::Seal        => true,
+        Token::Domain      => true,
+        _                  => false,
+    }
+}

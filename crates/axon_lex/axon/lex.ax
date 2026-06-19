@@ -1,0 +1,201 @@
+// lex.ax -- Sovereign AXONYX lexer core
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Single-pass lexer with one character of lookahead.
+// This is the first AXONYX program -- the language describes itself.
+// Mirrored in Rust by bridge.rs. Compiled natively by axonc at P55.
+//
+// Dependencies: cursor.ax, token.ax
+
+// Tokenize an entire source string. Final token is always Eof.
+fn lex_all(source: str) -> [Token] {
+    let mut cursor: Cursor = cursor_new(source);
+    let mut tokens: [Token] = [];
+    loop {
+        let tok: Token = lex_next(&mut cursor);
+        let done: bool = tok == Token::Eof;
+        tokens = append(tokens, tok);
+        if done { return tokens; }
+    }
+}
+
+// Tokenize the next single token from the cursor.
+fn lex_next(cursor: &mut Cursor) -> Token {
+    let ch: char = cursor_advance(cursor);
+    match ch {
+        '\0'                => Token::Eof,
+        '\n'                => Token::Newline,
+        ' ' | '\t' | '\r' => Token::Whitespace,
+        '/'                  => lex_slash(cursor),
+        '"' => lex_string(cursor),
+        '0'..='9'          => lex_number(cursor, ch),
+        'a'..='z' | 'A'..='Z' | '_' => lex_ident(cursor, ch),
+        '+'  => Token::Plus,
+        '*'  => Token::Star,
+        '%'  => Token::Percent,
+        ';'  => Token::Semi,
+        ','  => Token::Comma,
+        '('  => Token::LParen,
+        ')'  => Token::RParen,
+        '{'  => Token::LBrace,
+        '}'  => Token::RBrace,
+        '['  => Token::LBracket,
+        ']'  => Token::RBracket,
+        '-'  => lex_minus(cursor),
+        '='  => lex_eq(cursor),
+        '!'  => lex_bang(cursor),
+        '<'  => lex_lt(cursor),
+        '>'  => lex_gt(cursor),
+        '&'  => lex_and(cursor),
+        '|'  => lex_pipe(cursor),
+        '.'  => lex_dot(cursor),
+        ':'  => lex_colon(cursor),
+        _     => Token::Unknown(ch),
+    }
+}
+
+fn lex_slash(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '/' {
+        cursor_advance(cursor);
+        let mut comment: str = "";
+        while cursor_peek(cursor) != '\n' && cursor_peek(cursor) != '\0' {
+            comment = str_push(comment, cursor_advance(cursor));
+        }
+        Token::Comment(str_trim(comment))
+    } else if cursor_peek(cursor) == '*' {
+        cursor_advance(cursor);
+        let mut comment: str = "";
+        loop {
+            let c: char = cursor_advance(cursor);
+            if c == '\0' { return Token::Unknown(c); }
+            if c == '*' && cursor_peek(cursor) == '/' {
+                cursor_advance(cursor);
+                return Token::Comment(str_trim(comment));
+            }
+            comment = str_push(comment, c);
+        }
+    } else {
+        Token::Slash
+    }
+}
+
+fn lex_string(cursor: &mut Cursor) -> Token {
+    let mut s: str = "";
+    loop {
+        let c: char = cursor_advance(cursor);
+        if c == '\0' { return Token::Unknown(c); }
+        if c == '"' { return Token::StringLit(s); }
+        if c == '\\' {
+            let e: char = cursor_advance(cursor);
+            match e {
+                'n'  => s = str_push(s, '\n'),
+                't'  => s = str_push(s, '\t'),
+                'r'  => s = str_push(s, '\r'),
+                '"' => s = str_push(s, '"'),
+                '\\' => s = str_push(s, '\\'),
+                '0'  => s = str_push(s, '\0'),
+                _    => s = str_push(s, e),
+            }
+        } else {
+            s = str_push(s, c);
+        }
+    }
+}
+
+fn lex_number(cursor: &mut Cursor, first: char) -> Token {
+    let mut num: str = char_to_str(first);
+    while char_is_digit(cursor_peek(cursor)) {
+        num = str_push(num, cursor_advance(cursor));
+    }
+    if cursor_peek(cursor) == '.' && char_is_digit(cursor_peek2(cursor)) {
+        num = str_push(num, cursor_advance(cursor));
+        while char_is_digit(cursor_peek(cursor)) {
+            num = str_push(num, cursor_advance(cursor));
+        }
+        Token::FloatLit(parse_f64(num))
+    } else {
+        Token::IntLit(parse_i64(num))
+    }
+}
+
+fn lex_ident(cursor: &mut Cursor, first: char) -> Token {
+    let mut ident: str = char_to_str(first);
+    while char_is_alphanumeric(cursor_peek(cursor)) || cursor_peek(cursor) == '_' {
+        ident = str_push(ident, cursor_advance(cursor));
+    }
+    match ident {
+        "fn"         => Token::Fn,
+        "let"        => Token::Let,
+        "mut"        => Token::Mut,
+        "if"         => Token::If,
+        "else"       => Token::Else,
+        "while"      => Token::While,
+        "for"        => Token::For,
+        "return"     => Token::Return,
+        "match"      => Token::Match,
+        "struct"     => Token::Struct,
+        "enum"       => Token::Enum,
+        "impl"       => Token::Impl,
+        "pub"        => Token::Pub,
+        "use"        => Token::Use,
+        "mod"        => Token::Mod,
+        "type"       => Token::Type,
+        "const"      => Token::Const,
+        "static"     => Token::Static,
+        "nil"        => Token::Nil,
+        "true"       => Token::BoolLit(true),
+        "false"      => Token::BoolLit(false),
+        "sovereign"  => Token::Sovereign,
+        "capability" => Token::Capability,
+        "seal"       => Token::Seal,
+        "domain"     => Token::Domain,
+        _            => Token::Ident(ident),
+    }
+}
+
+fn lex_minus(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '>' { cursor_advance(cursor); Token::Arrow }
+    else { Token::Minus }
+}
+
+fn lex_eq(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '=' { cursor_advance(cursor); Token::EqEq }
+    else if cursor_peek(cursor) == '>' { cursor_advance(cursor); Token::FatArrow }
+    else { Token::Eq }
+}
+
+fn lex_bang(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '=' { cursor_advance(cursor); Token::BangEq }
+    else { Token::Bang }
+}
+
+fn lex_lt(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '=' { cursor_advance(cursor); Token::LtEq }
+    else { Token::Lt }
+}
+
+fn lex_gt(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '=' { cursor_advance(cursor); Token::GtEq }
+    else { Token::Gt }
+}
+
+fn lex_and(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '&' { cursor_advance(cursor); Token::AndAnd }
+    else { Token::And }
+}
+
+fn lex_pipe(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '|' { cursor_advance(cursor); Token::PipePipe }
+    else { Token::Pipe }
+}
+
+fn lex_dot(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == '.' { cursor_advance(cursor); Token::DotDot }
+    else { Token::Dot }
+}
+
+fn lex_colon(cursor: &mut Cursor) -> Token {
+    if cursor_peek(cursor) == ':' { cursor_advance(cursor); Token::ColonColon }
+    else { Token::Colon }
+}

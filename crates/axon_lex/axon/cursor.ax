@@ -1,0 +1,49 @@
+// cursor.ax -- Sovereign source cursor for the AXONYX lexer
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Defines the Cursor type: character-by-character access to source text.
+// Mirrored in Rust by bridge.rs Cursor struct.
+// Compiled natively by axonc at P55 bootstrap.
+
+struct Cursor {
+    source: [char],
+    pos: usize,
+}
+
+fn cursor_new(source: str) -> Cursor {
+    Cursor {
+        source: str_chars(source),
+        pos: 0,
+    }
+}
+
+// Return current character without consuming.
+// Returns null char at end of source.
+fn cursor_peek(cursor: &Cursor) -> char {
+    if cursor.pos >= len(cursor.source) {
+        return '\0';
+    }
+    cursor.source[cursor.pos]
+}
+
+// Return the character after current without consuming.
+fn cursor_peek2(cursor: &Cursor) -> char {
+    if (cursor.pos + 1) >= len(cursor.source) {
+        return '\0';
+    }
+    cursor.source[cursor.pos + 1]
+}
+
+// Consume and return current character.
+fn cursor_advance(cursor: &mut Cursor) -> char {
+    let ch: char = cursor_peek(cursor);
+    if ch != '\0' {
+        cursor.pos = cursor.pos + 1;
+    }
+    ch
+}
+
+fn cursor_is_eof(cursor: &Cursor) -> bool {
+    cursor.pos >= len(cursor.source)
+}
