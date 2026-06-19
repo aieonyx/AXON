@@ -1,0 +1,167 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "AXONYX",
+  "scopeName": "source.axonyx",
+  "fileTypes": [
+    "ax",
+    "axn"
+  ],
+  "patterns": [
+    {
+      "include": "#line_comments"
+    },
+    {
+      "include": "#block_comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#sovereign_keywords"
+    },
+    {
+      "include": "#control_keywords"
+    },
+    {
+      "include": "#declaration_keywords"
+    },
+    {
+      "include": "#boolean_literals"
+    },
+    {
+      "include": "#nil_literal"
+    },
+    {
+      "include": "#float_literals"
+    },
+    {
+      "include": "#integer_literals"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#function_calls"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "line_comments": {
+      "name": "comment.line.double-slash.axonyx",
+      "match": "//.*$"
+    },
+    "block_comments": {
+      "name": "comment.block.axonyx",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    "strings": {
+      "name": "string.quoted.double.axonyx",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.axonyx",
+          "match": "\\\\[ntr\"\\\\0]"
+        }
+      ]
+    },
+    "sovereign_keywords": {
+      "name": "keyword.other.sovereign.axonyx",
+      "match": "\\b(sovereign|capability|seal|domain)\\b"
+    },
+    "control_keywords": {
+      "name": "keyword.control.axonyx",
+      "match": "\\b(if|else|while|for|match|return|loop|break|continue)\\b"
+    },
+    "declaration_keywords": {
+      "name": "keyword.declaration.axonyx",
+      "match": "\\b(fn|let|mut|struct|enum|impl|pub|use|mod|type|const|static)\\b"
+    },
+    "boolean_literals": {
+      "name": "constant.language.boolean.axonyx",
+      "match": "\\b(true|false)\\b"
+    },
+    "nil_literal": {
+      "name": "constant.language.nil.axonyx",
+      "match": "\\bnil\\b"
+    },
+    "float_literals": {
+      "name": "constant.numeric.float.axonyx",
+      "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b"
+    },
+    "integer_literals": {
+      "name": "constant.numeric.integer.axonyx",
+      "match": "\\b[0-9][0-9_]*\\b"
+    },
+    "types": {
+      "name": "entity.name.type.axonyx",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+    },
+    "function_calls": {
+      "name": "entity.name.function.axonyx",
+      "match": "\\b([a-z_][a-zA-Z0-9_]*)(?=\\s*\\()"
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.axonyx",
+          "match": "->|=>"
+        },
+        {
+          "name": "keyword.operator.comparison.axonyx",
+          "match": "==|!=|<=|>="
+        },
+        {
+          "name": "keyword.operator.logical.axonyx",
+          "match": "&&|\\|\\|"
+        },
+        {
+          "name": "keyword.operator.path.axonyx",
+          "match": "::"
+        },
+        {
+          "name": "keyword.operator.range.axonyx",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.axonyx",
+          "match": "[+\\-*/%!<>=&|]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.terminator.axonyx",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.axonyx",
+          "match": ","
+        },
+        {
+          "name": "punctuation.accessor.axonyx",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.definition.block.axonyx",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.definition.group.axonyx",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.definition.array.axonyx",
+          "match": "[\\[\\]]"
+        }
+      ]
+    }
+  }
+}

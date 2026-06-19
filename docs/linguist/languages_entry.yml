@@ -1,0 +1,13 @@
+# Add this entry to lib/linguist/languages.yml in the linguist fork.
+# language_id is assigned by running: ruby script/update-ids
+# Submit PR to: https://github.com/github-linguist/linguist
+
+AXONYX:
+  type: programming
+  color: "#1A3A5C"
+  extensions:
+  - ".ax"
+  - ".axn"
+  tm_scope: source.axonyx
+  ace_mode: text
+  language_id: 0
