@@ -1,0 +1,32 @@
+// unify.ax -- Type unification engine for AXONYX
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Structural unification. Unknown matches anything (wildcard).
+// Full union-find with type variable binding available at P57.
+// Mirrored in Rust by unify.rs. Compiled natively by axonc at P55.
+
+fn unify(t1: Ty, t2: Ty) -> bool {
+    match (t1, t2) {
+        (Ty::Unknown, _) | (_, Ty::Unknown) => true,
+        (Ty::I32,  Ty::I32)  => true,
+        (Ty::I64,  Ty::I64)  => true,
+        (Ty::F64,  Ty::F64)  => true,
+        (Ty::Bool, Ty::Bool) => true,
+        (Ty::Str,  Ty::Str)  => true,
+        (Ty::Nil,  Ty::Nil)  => true,
+        (Ty::Named(a), Ty::Named(b)) => a == b,
+        (Ty::Var(_), _) | (_, Ty::Var(_)) => true,
+        _ => false,
+    }
+}
+
+fn unify_all(constraints: [Constraint]) -> bool {
+    for c in constraints {
+        match c {
+            Constraint::Eq(t1, t2)  => if !unify(t1, t2) { return false; }
+            Constraint::VarEq(_, t) => if t == Ty::Unknown { return false; }
+        }
+    }
+    true
+}

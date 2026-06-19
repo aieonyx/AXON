@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "axon_infer"
+version = "0.52.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_infer — Type inference. AXON infers its own types. P52."
+license = "Apache-2.0"
+
+[dependencies]
+axon_std_string = { path = "../axon_std/string" }
+axon_parse      = { path = "../axon_parse" }
+axon_hir        = { path = "../axon_hir" }
+
+[dev-dependencies]

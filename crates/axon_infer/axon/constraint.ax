@@ -1,0 +1,63 @@
+// constraint.ax -- Type constraint generation for AXONYX
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Constraint-based type inference (Hindley-Milner subset).
+// AXON infers its own types -- the language describes its own type system.
+// Mirrored in Rust by infer.rs. Compiled natively by axonc at P55.
+
+type TyVar = usize;
+
+enum Constraint {
+    Eq(Ty, Ty),
+    VarEq(TyVar, Ty),
+}
+
+fn gen_expr_ty(expr: &HirExpr, env: &TypeEnv) -> Ty {
+    match expr {
+        HirExpr::IntLit(_)    => Ty::I32,
+        HirExpr::FloatLit(_)  => Ty::F64,
+        HirExpr::BoolLit(_)   => Ty::Bool,
+        HirExpr::StringLit(_) => Ty::Str,
+        HirExpr::Nil          => Ty::Nil,
+        HirExpr::Var(name)    => env_lookup(env, name),
+        HirExpr::BinOp { op, lhs, rhs } => {
+            let lt: Ty = gen_expr_ty(lhs, env);
+            match op {
+                HirBinOp::Eq | HirBinOp::Ne |
+                HirBinOp::Lt | HirBinOp::Le |
+                HirBinOp::Gt | HirBinOp::Ge |
+                HirBinOp::And | HirBinOp::Or => Ty::Bool,
+                _ => lt,
+            }
+        }
+        HirExpr::UnaryOp { op, expr } => {
+            let t: Ty = gen_expr_ty(expr, env);
+            match op {
+                HirUnaryOp::Not => Ty::Bool,
+                HirUnaryOp::Neg => t,
+            }
+        }
+        HirExpr::Call { name, args } => env_fn_ret(env, name),
+        HirExpr::If { .. }           => Ty::Nil,
+    }
+}
+
+fn gen_stmt_constraints(stmt: &HirStmt, env: &TypeEnv, ret_ty: Ty) -> [Constraint] {
+    match stmt {
+        HirStmt::Let { name, ty: HirTy::Infer, value } => {
+            let val_ty: Ty = gen_expr_ty(value, env);
+            [Constraint::VarEq(fresh_var(), val_ty)]
+        }
+        HirStmt::Let { name, ty: HirTy::Named(n), value } => {
+            let val_ty: Ty  = gen_expr_ty(value, env);
+            let named_ty: Ty = ty_from_name(n);
+            [Constraint::Eq(named_ty, val_ty)]
+        }
+        HirStmt::Return(expr) => {
+            let expr_ty: Ty = gen_expr_ty(expr, env);
+            [Constraint::Eq(ret_ty, expr_ty)]
+        }
+        HirStmt::ExprStmt(_) => [],
+    }
+}
