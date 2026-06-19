@@ -1,0 +1,285 @@
+// parse.ax -- Sovereign AXONYX recursive descent parser
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// AXON describes its own grammar.
+// Single-pass recursive descent. No backtracking. MAX_DEPTH knock protection.
+// Mirrored in Rust by bridge.rs. Compiled natively by axonc at P55.
+//
+// Dependencies: ast.ax, token_stream.ax, token.ax (from axon_lex)
+
+fn parse(source: str) -> Program {
+    let tokens: [Token] = lex_all(source);
+    let mut s: TokenStream = token_stream_new(tokens);
+    parse_program(&mut s)
+}
+
+fn parse_program(s: &mut TokenStream) -> Program {
+    let mut items: [Item] = [];
+    while !ts_is_eof(s) {
+        let item: Item = parse_item(s);
+        items = append(items, item);
+    }
+    Program { items: items }
+}
+
+fn parse_item(s: &mut TokenStream) -> Item {
+    match ts_peek(s) {
+        Token::Fn     => parse_fn(s),
+        Token::Struct => parse_struct(s),
+        _             => parse_fn(s), // error fallback
+    }
+}
+
+fn parse_fn(s: &mut TokenStream) -> Item {
+    ts_advance(s); // consume fn
+    let name: str = ts_expect_ident(s);
+    ts_expect(s, Token::LParen);
+    let params: [Param] = parse_params(s);
+    ts_expect(s, Token::RParen);
+    ts_expect(s, Token::Arrow);
+    let ret: TypeExpr = parse_type_expr(s);
+    let body: [Stmt] = parse_block_stmts(s);
+    Item::Fn { name: name, params: params, ret: ret, body: body }
+}
+
+fn parse_params(s: &mut TokenStream) -> [Param] {
+    let mut params: [Param] = [];
+    if ts_peek(s) == Token::RParen {
+        return params;
+    }
+    params = append(params, parse_param(s));
+    while ts_peek(s) == Token::Comma {
+        ts_advance(s);
+        if ts_peek(s) == Token::RParen { break; }
+        params = append(params, parse_param(s));
+    }
+    params
+}
+
+fn parse_param(s: &mut TokenStream) -> Param {
+    let name: str = ts_expect_ident(s);
+    ts_expect(s, Token::Colon);
+    let ty: TypeExpr = parse_type_expr(s);
+    Param { name: name, ty: ty }
+}
+
+fn parse_struct(s: &mut TokenStream) -> Item {
+    ts_advance(s); // consume struct
+    let name: str = ts_expect_ident(s);
+    ts_expect(s, Token::LBrace);
+    let fields: [Field] = parse_fields(s);
+    ts_expect(s, Token::RBrace);
+    Item::Struct { name: name, fields: fields }
+}
+
+fn parse_fields(s: &mut TokenStream) -> [Field] {
+    let mut fields: [Field] = [];
+    while ts_peek(s) != Token::RBrace && ts_peek(s) != Token::Eof {
+        let name: str = ts_expect_ident(s);
+        ts_expect(s, Token::Colon);
+        let ty: TypeExpr = parse_type_expr(s);
+        fields = append(fields, Field { name: name, ty: ty });
+        if ts_peek(s) == Token::Comma { ts_advance(s); }
+    }
+    fields
+}
+
+fn parse_type_expr(s: &mut TokenStream) -> TypeExpr {
+    let name: str = ts_expect_ident(s);
+    TypeExpr { name: name }
+}
+
+fn parse_block_stmts(s: &mut TokenStream) -> [Stmt] {
+    ts_expect(s, Token::LBrace);
+    let mut stmts: [Stmt] = [];
+    while ts_peek(s) != Token::RBrace && ts_peek(s) != Token::Eof {
+        stmts = append(stmts, parse_stmt(s));
+    }
+    ts_expect(s, Token::RBrace);
+    stmts
+}
+
+fn parse_stmt(s: &mut TokenStream) -> Stmt {
+    match ts_peek(s) {
+        Token::Let    => parse_let(s),
+        Token::Return => parse_return(s),
+        _             => parse_expr_stmt(s),
+    }
+}
+
+fn parse_let(s: &mut TokenStream) -> Stmt {
+    ts_advance(s); // consume let
+    let mutable: bool = if ts_peek(s) == Token::Mut {
+        ts_advance(s); true
+    } else { false };
+    let name: str = ts_expect_ident(s);
+    if ts_peek(s) == Token::Colon {
+        ts_advance(s);
+        parse_type_expr(s); // skip type annotation
+    }
+    ts_expect(s, Token::Eq);
+    let value: Expr = parse_expr(s);
+    ts_expect(s, Token::Semi);
+    Stmt::Let { name: name, mutable: mutable, value: value }
+}
+
+fn parse_return(s: &mut TokenStream) -> Stmt {
+    ts_advance(s); // consume return
+    let expr: Expr = parse_expr(s);
+    ts_expect(s, Token::Semi);
+    Stmt::Return(expr)
+}
+
+fn parse_expr_stmt(s: &mut TokenStream) -> Stmt {
+    let expr: Expr = parse_expr(s);
+    ts_expect(s, Token::Semi);
+    Stmt::ExprStmt(expr)
+}
+
+fn parse_expr(s: &mut TokenStream) -> Expr {
+    if !ts_enter(s) { return Expr::Nil; }
+    let result: Expr = parse_equality(s);
+    ts_exit(s);
+    result
+}
+
+fn parse_equality(s: &mut TokenStream) -> Expr {
+    let mut lhs: Expr = parse_comparison(s);
+    loop {
+        let op: BinOpKind = match ts_peek(s) {
+            Token::EqEq   => BinOpKind::Eq,
+            Token::BangEq => BinOpKind::Ne,
+            _             => break,
+        };
+        ts_advance(s);
+        let rhs: Expr = parse_comparison(s);
+        lhs = Expr::BinOp { op: op, lhs: box(lhs), rhs: box(rhs) };
+    }
+    lhs
+}
+
+fn parse_comparison(s: &mut TokenStream) -> Expr {
+    let mut lhs: Expr = parse_term(s);
+    loop {
+        let op: BinOpKind = match ts_peek(s) {
+            Token::Lt   => BinOpKind::Lt,
+            Token::LtEq => BinOpKind::Le,
+            Token::Gt   => BinOpKind::Gt,
+            Token::GtEq => BinOpKind::Ge,
+            _           => break,
+        };
+        ts_advance(s);
+        let rhs: Expr = parse_term(s);
+        lhs = Expr::BinOp { op: op, lhs: box(lhs), rhs: box(rhs) };
+    }
+    lhs
+}
+
+fn parse_term(s: &mut TokenStream) -> Expr {
+    let mut lhs: Expr = parse_factor(s);
+    loop {
+        let op: BinOpKind = match ts_peek(s) {
+            Token::Plus  => BinOpKind::Add,
+            Token::Minus => BinOpKind::Sub,
+            _            => break,
+        };
+        ts_advance(s);
+        let rhs: Expr = parse_factor(s);
+        lhs = Expr::BinOp { op: op, lhs: box(lhs), rhs: box(rhs) };
+    }
+    lhs
+}
+
+fn parse_factor(s: &mut TokenStream) -> Expr {
+    let mut lhs: Expr = parse_unary(s);
+    loop {
+        let op: BinOpKind = match ts_peek(s) {
+            Token::Star    => BinOpKind::Mul,
+            Token::Slash   => BinOpKind::Div,
+            Token::Percent => BinOpKind::Mod,
+            _              => break,
+        };
+        ts_advance(s);
+        let rhs: Expr = parse_unary(s);
+        lhs = Expr::BinOp { op: op, lhs: box(lhs), rhs: box(rhs) };
+    }
+    lhs
+}
+
+fn parse_unary(s: &mut TokenStream) -> Expr {
+    match ts_peek(s) {
+        Token::Bang  => {
+            ts_advance(s);
+            Expr::UnaryOp { op: UnaryOpKind::Not, expr: box(parse_unary(s)) }
+        }
+        Token::Minus => {
+            ts_advance(s);
+            Expr::UnaryOp { op: UnaryOpKind::Neg, expr: box(parse_unary(s)) }
+        }
+        _ => parse_call(s),
+    }
+}
+
+fn parse_call(s: &mut TokenStream) -> Expr {
+    let primary: Expr = parse_primary(s);
+    match primary {
+        Expr::Ident(name) => {
+            if ts_peek(s) == Token::LParen {
+                ts_advance(s);
+                let args: [Expr] = parse_args(s);
+                ts_expect(s, Token::RParen);
+                Expr::Call { name: name, args: args }
+            } else {
+                Expr::Ident(name)
+            }
+        }
+        _ => primary,
+    }
+}
+
+fn parse_args(s: &mut TokenStream) -> [Expr] {
+    let mut args: [Expr] = [];
+    if ts_peek(s) == Token::RParen { return args; }
+    args = append(args, parse_expr(s));
+    while ts_peek(s) == Token::Comma {
+        ts_advance(s);
+        if ts_peek(s) == Token::RParen { break; }
+        args = append(args, parse_expr(s));
+    }
+    args
+}
+
+fn parse_if(s: &mut TokenStream) -> Expr {
+    ts_advance(s); // consume if
+    let cond: Expr = parse_expr(s);
+    let then_stmts: [Stmt] = parse_block_stmts(s);
+    let then: Expr = Expr::Block(then_stmts);
+    let else_: Option<Box<Expr>> = if ts_peek(s) == Token::Else {
+        ts_advance(s);
+        let else_stmts: [Stmt] = parse_block_stmts(s);
+        some(box(Expr::Block(else_stmts)))
+    } else {
+        none()
+    };
+    Expr::If { cond: box(cond), then: box(then), else_: else_ }
+}
+
+fn parse_primary(s: &mut TokenStream) -> Expr {
+    match ts_peek(s) {
+        Token::IntLit(n)     => { ts_advance(s); Expr::IntLit(n) }
+        Token::FloatLit(f)   => { ts_advance(s); Expr::FloatLit(f) }
+        Token::StringLit(st) => { ts_advance(s); Expr::StringLit(st) }
+        Token::BoolLit(b)    => { ts_advance(s); Expr::BoolLit(b) }
+        Token::Nil           => { ts_advance(s); Expr::Nil }
+        Token::Ident(name)   => { ts_advance(s); Expr::Ident(name) }
+        Token::If            => parse_if(s),
+        Token::LParen        => {
+            ts_advance(s);
+            let expr: Expr = parse_expr(s);
+            ts_expect(s, Token::RParen);
+            expr
+        }
+        _ => Expr::Nil,
+    }
+}
