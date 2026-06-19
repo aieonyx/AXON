@@ -1,0 +1,231 @@
+// native.ax -- AXONYX x86_64 native codegen pass
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// AXON emits its own machine bytes.
+// Single-pass stack-machine evaluation. System V AMD64 ABI.
+// Mirrored in Rust by native.rs. Compiled natively by axonc at P55.
+// Closes DEFER-P53-001: if/else with conditional jumps.
+//
+// Dependencies: x86.ax, hir.ax (from axon_hir), ty.ax (from axon_infer)
+
+struct NativeCtx {
+    code:        [u8],
+    param_regs:  [(str, u8)],
+    local_slots: [(str, usize)],
+    fn_offsets:  [(str, usize)],
+    relocs:      [(usize, str)],
+}
+
+fn native_ctx_new() -> NativeCtx {
+    NativeCtx {
+        code:        [],
+        param_regs:  [],
+        local_slots: [],
+        fn_offsets:  [],
+        relocs:      [],
+    }
+}
+
+fn ctx_emit(ctx: &mut NativeCtx, bytes: [u8]) {
+    ctx.code = concat_bytes(ctx.code, bytes);
+}
+
+fn ctx_pos(ctx: &NativeCtx) -> usize {
+    len(ctx.code)
+}
+
+fn ctx_patch_i32(ctx: &mut NativeCtx, pos: usize, val: i32) {
+    let bytes: [u8; 4] = i32_to_le_bytes(val);
+    ctx.code[pos]     = bytes[0];
+    ctx.code[pos + 1] = bytes[1];
+    ctx.code[pos + 2] = bytes[2];
+    ctx.code[pos + 3] = bytes[3];
+}
+
+fn emit_program(hir: &HirProgram, typed: &InferredProgram) -> [u8] {
+    let mut ctx: NativeCtx = native_ctx_new();
+    for i in 0..len(hir.fns) {
+        emit_fn(&mut ctx, &hir.fns[i], &typed.fns[i]);
+    }
+    apply_relocations(&mut ctx);
+    ctx.code
+}
+
+fn emit_fn(ctx: &mut NativeCtx, f: &HirFn, inf: &InferredFn) {
+    ctx.fn_offsets = append(ctx.fn_offsets, (f.name, ctx_pos(ctx)));
+    let local_count: usize = count_locals(&f.body);
+    ctx.param_regs  = [];
+    ctx.local_slots = [];
+
+    let param_reg_ids: [u8] = [7, 6, 2];
+    for i in 0..len(f.params) {
+        if i < len(param_reg_ids) {
+            ctx.param_regs = append(ctx.param_regs, (f.params[i].name, param_reg_ids[i]));
+        }
+    }
+
+    ctx_emit(ctx, push_rbp());
+    ctx_emit(ctx, mov_rbp_rsp());
+    if local_count > 0 {
+        ctx_emit(ctx, sub_rsp_imm8((local_count * 8) as u8));
+    }
+
+    for stmt in f.body {
+        emit_stmt(ctx, stmt);
+    }
+}
+
+fn emit_stmt(ctx: &mut NativeCtx, stmt: &HirStmt) {
+    match stmt {
+        HirStmt::Let { name, value, .. } => {
+            emit_expr(ctx, value);
+            let slot: usize = len(ctx.local_slots);
+            ctx_emit(ctx, store_rax_rbp_slot(slot));
+            ctx.local_slots = append(ctx.local_slots, (name, slot));
+        }
+        HirStmt::Return(expr) => {
+            emit_expr(ctx, expr);
+            ctx_emit(ctx, mov_rsp_rbp());
+            ctx_emit(ctx, pop_rbp());
+            ctx_emit(ctx, ret_byte());
+        }
+        HirStmt::ExprStmt(expr) => {
+            emit_expr(ctx, expr);
+        }
+    }
+}
+
+fn emit_expr(ctx: &mut NativeCtx, expr: &HirExpr) {
+    match expr {
+        HirExpr::IntLit(n)    => ctx_emit(ctx, mov_rax_imm32(n as i32)),
+        HirExpr::BoolLit(b)   => ctx_emit(ctx, mov_rax_imm32(if b { 1 } else { 0 })),
+        HirExpr::Nil          => ctx_emit(ctx, xor_rax_rax()),
+        HirExpr::StringLit(_) => ctx_emit(ctx, xor_rax_rax()),
+        HirExpr::FloatLit(_)  => ctx_emit(ctx, mov_rax_imm32(0)),
+        HirExpr::Var(name)    => emit_var(ctx, name),
+        HirExpr::BinOp { op, lhs, rhs }  => emit_binop(ctx, op, lhs, rhs),
+        HirExpr::UnaryOp { op, expr }     => emit_unaryop(ctx, op, expr),
+        HirExpr::Call { name, args }      => emit_call(ctx, name, args),
+        HirExpr::If { cond, then, else_ } => emit_if(ctx, cond, then, else_),
+    }
+}
+
+fn emit_var(ctx: &mut NativeCtx, name: str) {
+    for (pname, reg_id) in ctx.param_regs {
+        if pname == name {
+            ctx_emit(ctx, mov_rax_param(reg_id));
+            return;
+        }
+    }
+    for (lname, slot) in ctx.local_slots {
+        if lname == name {
+            ctx_emit(ctx, load_rax_rbp_slot(slot));
+            return;
+        }
+    }
+}
+
+fn emit_binop(ctx: &mut NativeCtx, op: &HirBinOp, lhs: &HirExpr, rhs: &HirExpr) {
+    emit_expr(ctx, lhs);
+    ctx_emit(ctx, push_rax());
+    emit_expr(ctx, rhs);
+    ctx_emit(ctx, pop_rbx());
+    match op {
+        HirBinOp::Add => ctx_emit(ctx, add_rax_rbx()),
+        HirBinOp::Sub => { ctx_emit(ctx, sub_rbx_rax()); ctx_emit(ctx, mov_rax_rbx()); }
+        HirBinOp::Mul => ctx_emit(ctx, imul_rax_rbx()),
+        HirBinOp::Eq  => { ctx_emit(ctx, cmp_rbx_rax()); ctx_emit(ctx, sete_al());  ctx_emit(ctx, movzx_rax_al()); }
+        HirBinOp::Ne  => { ctx_emit(ctx, cmp_rbx_rax()); ctx_emit(ctx, setne_al()); ctx_emit(ctx, movzx_rax_al()); }
+        HirBinOp::Lt  => { ctx_emit(ctx, cmp_rbx_rax()); ctx_emit(ctx, setl_al());  ctx_emit(ctx, movzx_rax_al()); }
+        HirBinOp::Le  => { ctx_emit(ctx, cmp_rbx_rax()); ctx_emit(ctx, setle_al()); ctx_emit(ctx, movzx_rax_al()); }
+        HirBinOp::Gt  => { ctx_emit(ctx, cmp_rbx_rax()); ctx_emit(ctx, setg_al());  ctx_emit(ctx, movzx_rax_al()); }
+        HirBinOp::Ge  => { ctx_emit(ctx, cmp_rbx_rax()); ctx_emit(ctx, setge_al()); ctx_emit(ctx, movzx_rax_al()); }
+        HirBinOp::And => ctx_emit(ctx, and_rax_rbx()),
+        HirBinOp::Or  => ctx_emit(ctx, or_rax_rbx()),
+        _             => ctx_emit(ctx, mov_rax_rbx()),
+    }
+}
+
+fn emit_unaryop(ctx: &mut NativeCtx, op: &HirUnaryOp, expr: &HirExpr) {
+    emit_expr(ctx, expr);
+    match op {
+        HirUnaryOp::Neg => ctx_emit(ctx, neg_rax()),
+        HirUnaryOp::Not => ctx_emit(ctx, [0x48, 0x83, 0xf0, 0x01]),
+    }
+}
+
+fn emit_call(ctx: &mut NativeCtx, name: str, args: &[HirExpr]) {
+    for i in (0..len(args)).rev() {
+        emit_expr(ctx, &args[i]);
+        ctx_emit(ctx, push_rax());
+    }
+    let pop_ops: [[u8]] = [[0x5f], [0x5e], [0x5a]];
+    for i in 0..min(len(args), 3) {
+        ctx_emit(ctx, pop_ops[i]);
+    }
+    ctx_emit(ctx, [0xe8]);
+    let rel_pos: usize = ctx_pos(ctx);
+    ctx_emit(ctx, [0x00, 0x00, 0x00, 0x00]);
+    ctx.relocs = append(ctx.relocs, (rel_pos, name));
+}
+
+fn emit_if(ctx: &mut NativeCtx, cond: &HirExpr, then: &[HirStmt], else_: Option<&[HirStmt]>) {
+    emit_expr(ctx, cond);
+    ctx_emit(ctx, test_rax_rax());
+    ctx_emit(ctx, [0x0f, 0x84]);
+    let je_pos: usize = ctx_pos(ctx);
+    ctx_emit(ctx, [0x00, 0x00, 0x00, 0x00]);
+
+    for stmt in then { emit_stmt(ctx, stmt); }
+
+    let then_returns: bool = block_returns(then);
+    let jmp_pos: Option<usize> = if else_ != none() && !then_returns {
+        ctx_emit(ctx, [0xe9]);
+        let pos: usize = ctx_pos(ctx);
+        ctx_emit(ctx, [0x00, 0x00, 0x00, 0x00]);
+        some(pos)
+    } else { none() };
+
+    let je_target: usize = ctx_pos(ctx);
+    ctx_patch_i32(ctx, je_pos, (je_target as i64 - (je_pos + 4) as i64) as i32);
+
+    if let some(else_stmts) = else_ {
+        for stmt in else_stmts { emit_stmt(ctx, stmt); }
+    }
+
+    if let some(pos) = jmp_pos {
+        let t: usize = ctx_pos(ctx);
+        ctx_patch_i32(ctx, pos, (t as i64 - (pos + 4) as i64) as i32);
+    }
+}
+
+fn apply_relocations(ctx: &mut NativeCtx) {
+    for (rel_pos, fn_name) in ctx.relocs {
+        for (name, offset) in ctx.fn_offsets {
+            if name == fn_name {
+                let rel: i32 = (offset as i64 - (rel_pos + 4) as i64) as i32;
+                ctx_patch_i32(ctx, rel_pos, rel);
+            }
+        }
+    }
+}
+
+fn count_locals(stmts: &[HirStmt]) -> usize {
+    let mut n: usize = 0;
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Let { .. } => n = n + 1,
+            _ => {}
+        }
+    }
+    n
+}
+
+fn block_returns(stmts: &[HirStmt]) -> bool {
+    if is_empty(stmts) { return false; }
+    match last(stmts) {
+        HirStmt::Return(_) => true,
+        _                  => false,
+    }
+}

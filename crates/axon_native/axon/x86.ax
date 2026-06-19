@@ -1,0 +1,73 @@
+// x86.ax -- x86_64 byte encoding primitives for AXONYX native codegen
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Sovereign x86_64 encoding — AXON defines its own machine code.
+// Mirrored in Rust by x86.rs. System V AMD64 ABI throughout.
+// REX.W prefix (0x48) used for all 64-bit operations.
+
+fn push_rbp()    -> [u8] { [0x55] }
+fn pop_rbp()     -> [u8] { [0x5d] }
+fn mov_rbp_rsp() -> [u8] { [0x48, 0x89, 0xe5] }
+fn mov_rsp_rbp() -> [u8] { [0x48, 0x89, 0xec] }
+fn ret_byte()    -> [u8] { [0xc3] }
+fn push_rax()    -> [u8] { [0x50] }
+fn pop_rbx()     -> [u8] { [0x5b] }
+fn pop_rdi()     -> [u8] { [0x5f] }
+fn pop_rsi()     -> [u8] { [0x5e] }
+fn pop_rdx()     -> [u8] { [0x5a] }
+fn xor_rax_rax() -> [u8] { [0x48, 0x31, 0xc0] }
+fn neg_rax()     -> [u8] { [0x48, 0xf7, 0xd8] }
+fn test_rax_rax() -> [u8] { [0x48, 0x85, 0xc0] }
+fn add_rax_rbx() -> [u8] { [0x48, 0x01, 0xd8] }
+fn sub_rbx_rax() -> [u8] { [0x48, 0x29, 0xc3] }
+fn mov_rax_rbx() -> [u8] { [0x48, 0x89, 0xd8] }
+fn imul_rax_rbx() -> [u8] { [0x48, 0x0f, 0xaf, 0xc3] }
+fn and_rax_rbx() -> [u8] { [0x48, 0x21, 0xd8] }
+fn or_rax_rbx()  -> [u8] { [0x48, 0x09, 0xd8] }
+fn cmp_rbx_rax() -> [u8] { [0x48, 0x39, 0xc3] }
+fn sete_al()     -> [u8] { [0x0f, 0x94, 0xc0] }
+fn setne_al()    -> [u8] { [0x0f, 0x95, 0xc0] }
+fn setl_al()     -> [u8] { [0x0f, 0x9c, 0xc0] }
+fn setle_al()    -> [u8] { [0x0f, 0x9e, 0xc0] }
+fn setg_al()     -> [u8] { [0x0f, 0x9f, 0xc0] }
+fn setge_al()    -> [u8] { [0x0f, 0x9d, 0xc0] }
+fn movzx_rax_al() -> [u8] { [0x48, 0x0f, 0xb6, 0xc0] }
+
+fn mov_rax_imm32(n: i32) -> [u8] {
+    let b: [u8; 4] = i32_to_le_bytes(n);
+    [0x48, 0xc7, 0xc0, b[0], b[1], b[2], b[3]]
+}
+
+fn mov_rax_param(reg_id: u8) -> [u8] {
+    [0x48, 0x89, 0xc0 | (reg_id << 3)]
+}
+
+fn sub_rsp_imm8(n: u8) -> [u8] {
+    [0x48, 0x83, 0xec, n]
+}
+
+fn je_rel32(rel: i32) -> [u8] {
+    let b: [u8; 4] = i32_to_le_bytes(rel);
+    [0x0f, 0x84, b[0], b[1], b[2], b[3]]
+}
+
+fn jmp_rel32(rel: i32) -> [u8] {
+    let b: [u8; 4] = i32_to_le_bytes(rel);
+    [0xe9, b[0], b[1], b[2], b[3]]
+}
+
+fn call_rel32(rel: i32) -> [u8] {
+    let b: [u8; 4] = i32_to_le_bytes(rel);
+    [0xe8, b[0], b[1], b[2], b[3]]
+}
+
+fn load_rax_rbp_slot(slot: usize) -> [u8] {
+    let disp: i8 = -((slot as i32 + 1) * 8) as i8;
+    [0x48, 0x8b, 0x45, disp as u8]
+}
+
+fn store_rax_rbp_slot(slot: usize) -> [u8] {
+    let disp: i8 = -((slot as i32 + 1) * 8) as i8;
+    [0x48, 0x89, 0x45, disp as u8]
+}
