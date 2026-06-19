@@ -1,0 +1,71 @@
+// token_stream.ax -- Token stream cursor for AXONYX parser
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Provides filtered, position-aware access to the token stream.
+// Trivia (whitespace, newlines, comments) is stripped on construction.
+// Mirrored in Rust by bridge.rs TokenStream struct.
+
+const MAX_DEPTH: usize = 128;
+
+struct TokenStream {
+    tokens: [Token],
+    pos:    usize,
+    depth:  usize,
+}
+
+fn token_stream_new(tokens: [Token]) -> TokenStream {
+    let filtered: [Token] = filter(tokens, fn(t: &Token) -> bool {
+        !token_is_trivia(t)
+    });
+    TokenStream { tokens: filtered, pos: 0, depth: 0 }
+}
+
+fn ts_peek(s: &TokenStream) -> Token {
+    if s.pos >= len(s.tokens) {
+        return Token::Eof;
+    }
+    s.tokens[s.pos]
+}
+
+fn ts_advance(s: &mut TokenStream) -> Token {
+    let tok: Token = ts_peek(s);
+    if s.pos < len(s.tokens) {
+        s.pos = s.pos + 1;
+    }
+    tok
+}
+
+fn ts_expect(s: &mut TokenStream, expected: Token) -> bool {
+    if ts_peek(s) == expected {
+        ts_advance(s);
+        true
+    } else {
+        false
+    }
+}
+
+fn ts_expect_ident(s: &mut TokenStream) -> str {
+    match ts_peek(s) {
+        Token::Ident(name) => {
+            ts_advance(s);
+            name
+        }
+        _ => ""
+    }
+}
+
+fn ts_is_eof(s: &TokenStream) -> bool {
+    ts_peek(s) == Token::Eof
+}
+
+fn ts_enter(s: &mut TokenStream) -> bool {
+    s.depth = s.depth + 1;
+    s.depth <= MAX_DEPTH
+}
+
+fn ts_exit(s: &mut TokenStream) {
+    if s.depth > 0 {
+        s.depth = s.depth - 1;
+    }
+}

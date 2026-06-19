@@ -1,0 +1,62 @@
+// ast.ax -- AXONYX AST node definitions
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Sovereign source-of-truth for AXONYX AST nodes.
+// Mirrored in Rust by ast.rs.
+// P51 HIR lowering builds directly on these definitions.
+
+enum BinOpKind {
+    Add, Sub, Mul, Div, Mod,
+    Eq, Ne, Lt, Le, Gt, Ge,
+    And, Or,
+}
+
+enum UnaryOpKind { Neg, Not }
+
+struct TypeExpr {
+    name: str,
+}
+
+struct Param {
+    name: str,
+    ty:   TypeExpr,
+}
+
+struct Field {
+    name: str,
+    ty:   TypeExpr,
+}
+
+enum Expr {
+    IntLit(i64),
+    FloatLit(f64),
+    StringLit(str),
+    BoolLit(bool),
+    Nil,
+    Ident(str),
+    BinOp { op: BinOpKind, lhs: Box<Expr>, rhs: Box<Expr> },
+    UnaryOp { op: UnaryOpKind, expr: Box<Expr> },
+    Call { name: str, args: [Expr] },
+    Block([Stmt]),
+    If { cond: Box<Expr>, then: Box<Expr>, else_: Option<Box<Expr>> },
+}
+
+enum Stmt {
+    Let { name: str, mutable: bool, value: Expr },
+    Return(Expr),
+    ExprStmt(Expr),
+}
+
+enum Item {
+    Fn { name: str, params: [Param], ret: TypeExpr, body: [Stmt] },
+    Struct { name: str, fields: [Field] },
+}
+
+struct Program {
+    items: [Item],
+}
+
+fn program_new() -> Program {
+    Program { items: [] }
+}
