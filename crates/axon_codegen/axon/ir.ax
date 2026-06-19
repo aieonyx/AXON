@@ -1,0 +1,74 @@
+// ir.ax -- LLVM IR type definitions for AXONYX codegen
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// LLVM IR types and value representations.
+// Mirrored in Rust by ir.rs.
+// P54 native codegen replaces these with machine code types.
+
+enum IrTy {
+    I32, I64, Double, I1, I8Ptr, Void,
+}
+
+enum IrVal {
+    IntConst(i64),
+    FloatConst(f64),
+    BoolConst(bool),
+    Reg(str),       // %name
+    Global(str),    // @name
+    Null,
+}
+
+enum IrBinOp {
+    Add, Sub, Mul, SDiv, SRem,
+    FAdd, FSub, FMul, FDiv,
+    And, Or,
+}
+
+enum IrPred { Eq, Ne, Slt, Sle, Sgt, Sge }
+
+enum IrInstr {
+    Alloca  { reg: str, ty: IrTy },
+    Store   { ty: IrTy, val: IrVal, ptr: str },
+    Load    { reg: str, ty: IrTy, ptr: str },
+    BinOp   { reg: str, op: IrBinOp, ty: IrTy, lhs: IrVal, rhs: IrVal },
+    ICmp    { reg: str, pred: IrPred, ty: IrTy, lhs: IrVal, rhs: IrVal },
+    Call    { reg: Option<str>, fn_name: str, args: [(IrTy, IrVal)], ret: IrTy },
+    Ret     { ty: IrTy, val: IrVal },
+    RetVoid,
+}
+
+struct IrFn {
+    name:   str,
+    params: [(IrTy, str)],
+    ret:    IrTy,
+    body:   [IrInstr],
+}
+
+struct IrModule {
+    fns: [IrFn],
+}
+
+fn irtm_str(ty: IrTy) -> str {
+    match ty {
+        IrTy::I32    => "i32",
+        IrTy::I64    => "i64",
+        IrTy::Double => "double",
+        IrTy::I1     => "i1",
+        IrTy::I8Ptr  => "i8*",
+        IrTy::Void   => "void",
+    }
+}
+
+fn ty_to_ir(ty: Ty) -> IrTy {
+    match ty {
+        Ty::I32      => IrTy::I32,
+        Ty::I64      => IrTy::I64,
+        Ty::F64      => IrTy::Double,
+        Ty::Bool     => IrTy::I1,
+        Ty::Str      => IrTy::I8Ptr,
+        Ty::Nil      => IrTy::Void,
+        Ty::Named(_) => IrTy::I8Ptr,
+        _            => IrTy::I32,
+    }
+}
