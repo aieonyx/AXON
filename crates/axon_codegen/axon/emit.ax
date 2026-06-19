@@ -1,0 +1,201 @@
+// emit.ax -- AXONYX LLVM IR emission pass
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Single-pass linear emission: one HIR node maps to one IR sequence.
+// AXON emits its own IR -- the language describes its own compilation.
+// Mirrored in Rust by emit.rs. Compiled natively by axonc at P55.
+//
+// Dependencies: ir.ax, hir.ax (from axon_hir), ty.ax (from axon_infer)
+
+struct EmitCtx {
+    buf:     str,
+    reg:     usize,
+    params:  [(str, Ty)],
+    allocas: [(str, str, Ty)],
+    fn_rets: [(str, Ty)],
+}
+
+fn emit_ctx_new() -> EmitCtx {
+    EmitCtx {
+        buf:     "",
+        reg:     0,
+        params:  [],
+        allocas: [],
+        fn_rets: [],
+    }
+}
+
+fn ctx_fresh_reg(ctx: &mut EmitCtx) -> str {
+    let r: str = concat("%", int_to_str(ctx.reg));
+    ctx.reg = ctx.reg + 1;
+    r
+}
+
+fn ctx_line(ctx: &mut EmitCtx, line: str) {
+    ctx.buf = concat(ctx.buf, concat(line, "
+"));
+}
+
+fn emit_module(hir: &HirProgram, typed: &InferredProgram) -> str {
+    let mut ctx: EmitCtx = emit_ctx_new();
+
+    for f in typed.fns {
+        ctx.fn_rets = append(ctx.fn_rets, (f.name, f.ret_ty));
+    }
+
+    ctx_line(&mut ctx, "; AXONYX sovereign codegen output");
+    ctx_line(&mut ctx, "; Copyright (c) 2026 Edison Lepiten / AIEONYX");
+    ctx_line(&mut ctx, "");
+
+    for i in 0..len(hir.fns) {
+        emit_fn(&mut ctx, hir.fns[i], typed.fns[i]);
+    }
+
+    ctx.buf
+}
+
+fn emit_fn(ctx: &mut EmitCtx, f: &HirFn, inf: &InferredFn) {
+    ctx.reg     = 0;
+    ctx.params  = [];
+    ctx.allocas = [];
+
+    let mut param_strs: [str] = [];
+    for p in f.params {
+        let ty_s: str = irtm_str(ty_to_ir(ty_from_hir(p.ty)));
+        ctx.params = append(ctx.params, (p.name, ty_from_hir(p.ty)));
+        param_strs = append(param_strs, concat(ty_s, concat(" %", p.name)));
+    }
+
+    let ret_s: str = irtm_str(ty_to_ir(inf.ret_ty));
+    let header: str = concat("define ", concat(ret_s, concat(" @", concat(f.name,
+        concat("(", concat(str_join(param_strs, ", "), ") {"))))));
+    ctx_line(ctx, header);
+    ctx_line(ctx, "entry:");
+
+    for stmt in f.body {
+        emit_stmt(ctx, stmt);
+    }
+
+    ctx_line(ctx, "}");
+    ctx_line(ctx, "");
+}
+
+fn emit_stmt(ctx: &mut EmitCtx, stmt: &HirStmt) {
+    match stmt {
+        HirStmt::Let { name, value, .. } => {
+            let (val, ty): (str, Ty) = emit_expr(ctx, value);
+            let ir_ty: str           = irtm_str(ty_to_ir(ty));
+            let slot: str            = concat("%", concat(name, "_slot"));
+            ctx_line(ctx, concat("  ", concat(slot, concat(" = alloca ", ir_ty))));
+            ctx_line(ctx, concat("  store ", concat(ir_ty, concat(" ", concat(val,
+                concat(", ", concat(ir_ty, concat("* ", slot))))))));
+            ctx.allocas = append(ctx.allocas, (name, slot, ty));
+        }
+        HirStmt::Return(expr) => {
+            let (val, ty): (str, Ty) = emit_expr(ctx, expr);
+            if ty == Ty::Nil {
+                ctx_line(ctx, "  ret void");
+            } else {
+                let ir_ty: str = irtm_str(ty_to_ir(ty));
+                ctx_line(ctx, concat("  ret ", concat(ir_ty, concat(" ", val))));
+            }
+        }
+        HirStmt::ExprStmt(expr) => {
+            emit_expr(ctx, expr);
+        }
+    }
+}
+
+fn emit_expr(ctx: &mut EmitCtx, expr: &HirExpr) -> (str, Ty) {
+    match expr {
+        HirExpr::IntLit(n)    => (int_to_str(n), Ty::I32),
+        HirExpr::FloatLit(f)  => (float_to_str(f), Ty::F64),
+        HirExpr::BoolLit(b)   => (if b { "1" } else { "0" }, Ty::Bool),
+        HirExpr::Nil          => ("", Ty::Nil),
+        HirExpr::StringLit(_) => ("null", Ty::Str),
+        HirExpr::Var(name) => emit_var(ctx, name),
+        HirExpr::BinOp { op, lhs, rhs } => emit_binop(ctx, op, lhs, rhs),
+        HirExpr::UnaryOp { op, expr }   => emit_unaryop(ctx, op, expr),
+        HirExpr::Call { name, args }    => emit_call(ctx, name, args),
+        HirExpr::If { cond, then, .. }  => emit_if_simple(ctx, cond, then),
+    }
+}
+
+fn emit_var(ctx: &mut EmitCtx, name: str) -> (str, Ty) {
+    for (n, ty) in ctx.params {
+        if n == name { return (concat("%", name), ty); }
+    }
+    for (n, slot, ty) in ctx.allocas {
+        if n == name {
+            let reg: str   = ctx_fresh_reg(ctx);
+            let ir_ty: str = irtm_str(ty_to_ir(ty));
+            ctx_line(ctx, concat("  ", concat(reg, concat(" = load ",
+                concat(ir_ty, concat(", ", concat(ir_ty, concat("* ", slot))))))));
+            return (reg, ty);
+        }
+    }
+    ("", Ty::Unknown)
+}
+
+fn emit_binop(ctx: &mut EmitCtx, op: &HirBinOp, lhs: &HirExpr, rhs: &HirExpr) -> (str, Ty) {
+    let (lv, lty): (str, Ty) = emit_expr(ctx, lhs);
+    let (rv, _):   (str, Ty) = emit_expr(ctx, rhs);
+    let result: str          = ctx_fresh_reg(ctx);
+    let ir_ty: str           = irtm_str(ty_to_ir(lty));
+    let (instr, rty): (str, Ty) = match op {
+        HirBinOp::Add => (concat("add ", concat(ir_ty, concat(" ", concat(lv, concat(", ", rv))))), lty),
+        HirBinOp::Sub => (concat("sub ", concat(ir_ty, concat(" ", concat(lv, concat(", ", rv))))), lty),
+        HirBinOp::Mul => (concat("mul ", concat(ir_ty, concat(" ", concat(lv, concat(", ", rv))))), lty),
+        HirBinOp::Eq  => (concat("icmp eq ", concat(ir_ty, concat(" ", concat(lv, concat(", ", rv))))), Ty::Bool),
+        HirBinOp::Ne  => (concat("icmp ne ", concat(ir_ty, concat(" ", concat(lv, concat(", ", rv))))), Ty::Bool),
+        HirBinOp::Lt  => (concat("icmp slt ", concat(ir_ty, concat(" ", concat(lv, concat(", ", rv))))), Ty::Bool),
+        _ => ("", lty),
+    };
+    ctx_line(ctx, concat("  ", concat(result, concat(" = ", instr))));
+    (result, rty)
+}
+
+fn emit_unaryop(ctx: &mut EmitCtx, op: &HirUnaryOp, expr: &HirExpr) -> (str, Ty) {
+    let (val, ty): (str, Ty) = emit_expr(ctx, expr);
+    let result: str          = ctx_fresh_reg(ctx);
+    let (instr, rty): (str, Ty) = match op {
+        HirUnaryOp::Neg => (concat("sub ", concat(irtm_str(ty_to_ir(ty)), concat(" 0, ", val))), ty),
+        HirUnaryOp::Not => (concat("xor i1 ", concat(val, ", 1")), Ty::Bool),
+    };
+    ctx_line(ctx, concat("  ", concat(result, concat(" = ", instr))));
+    (result, rty)
+}
+
+fn emit_call(ctx: &mut EmitCtx, name: str, args: &[HirExpr]) -> (str, Ty) {
+    let mut arg_strs: [str] = [];
+    for arg in args {
+        let (val, ty): (str, Ty) = emit_expr(ctx, arg);
+        arg_strs = append(arg_strs, concat(irtm_str(ty_to_ir(ty)), concat(" ", val)));
+    }
+    let ret_ty: Ty  = fn_ret_lookup(ctx, name);
+    let args_s: str = str_join(arg_strs, ", ");
+    if ret_ty == Ty::Nil {
+        ctx_line(ctx, concat("  call void @", concat(name, concat("(", concat(args_s, ")")))));
+        ("", Ty::Nil)
+    } else {
+        let result: str = ctx_fresh_reg(ctx);
+        let ir_ret: str = irtm_str(ty_to_ir(ret_ty));
+        ctx_line(ctx, concat("  ", concat(result, concat(" = call ", concat(ir_ret,
+            concat(" @", concat(name, concat("(", concat(args_s, ")")))))))));
+        (result, ret_ty)
+    }
+}
+
+fn emit_if_simple(ctx: &mut EmitCtx, cond: &HirExpr, then: &[HirStmt]) -> (str, Ty) {
+    emit_expr(ctx, cond);
+    for stmt in then { emit_stmt(ctx, stmt); }
+    ("", Ty::Nil)
+}
+
+fn fn_ret_lookup(ctx: &EmitCtx, name: str) -> Ty {
+    for (n, ty) in ctx.fn_rets {
+        if n == name { return ty; }
+    }
+    Ty::Unknown
+}
