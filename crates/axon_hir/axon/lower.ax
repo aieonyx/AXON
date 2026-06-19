@@ -1,0 +1,145 @@
+// lower.ax -- AXONYX AST to HIR lowering pass
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// Single-pass top-down lowering. Each AST node maps to one HIR node.
+// AXON lowers its own AST -- the language describes its own compilation.
+// Mirrored in Rust by lower.rs. Compiled natively by axonc at P55.
+//
+// Dependencies: hir.ax, ast.ax (from axon_parse)
+
+fn lower_program(program: &Program) -> HirProgram {
+    let mut hir: HirProgram = hir_program_new();
+    for item in program.items {
+        match item {
+            Item::Fn { name, params, ret, body } => {
+                let hir_fn: HirFn = lower_fn(name, params, ret, body);
+                hir.fns = append(hir.fns, hir_fn);
+            }
+            Item::Struct { name, fields } => {
+                let hir_struct: HirStruct = lower_struct(name, fields);
+                hir.structs = append(hir.structs, hir_struct);
+            }
+        }
+    }
+    hir
+}
+
+fn lower_fn(name: str, params: [Param], ret: TypeExpr, body: [Stmt]) -> HirFn {
+    let hir_params: [HirParam] = map(params, fn(p: &Param) -> HirParam {
+        HirParam { name: p.name, ty: lower_ty(p.ty) }
+    });
+    let hir_body: [HirStmt] = map(body, lower_stmt);
+    HirFn {
+        id:     next_id(),
+        name:   name,
+        params: hir_params,
+        ret:    lower_ty(ret),
+        body:   hir_body,
+    }
+}
+
+fn lower_struct(name: str, fields: [Field]) -> HirStruct {
+    let hir_fields: [HirField] = map(fields, fn(f: &Field) -> HirField {
+        HirField { name: f.name, ty: lower_ty(f.ty) }
+    });
+    HirStruct { id: next_id(), name: name, fields: hir_fields }
+}
+
+fn lower_ty(ty: TypeExpr) -> HirTy {
+    if str_is_empty(ty.name) {
+        HirTy::Infer
+    } else {
+        HirTy::Named(ty.name)
+    }
+}
+
+fn lower_stmt(stmt: &Stmt) -> HirStmt {
+    match stmt {
+        Stmt::Let { name, mutable, value } =>
+            HirStmt::Let {
+                name:    name,
+                mutable: mutable,
+                ty:      HirTy::Infer,
+                value:   lower_expr(value),
+            },
+        Stmt::Return(expr) =>
+            HirStmt::Return(lower_expr(expr)),
+        Stmt::ExprStmt(expr) =>
+            HirStmt::ExprStmt(lower_expr(expr)),
+    }
+}
+
+fn lower_expr(expr: &Expr) -> HirExpr {
+    match expr {
+        Expr::IntLit(n)    => HirExpr::IntLit(n),
+        Expr::FloatLit(f)  => HirExpr::FloatLit(f),
+        Expr::StringLit(s) => HirExpr::StringLit(s),
+        Expr::BoolLit(b)   => HirExpr::BoolLit(b),
+        Expr::Nil          => HirExpr::Nil,
+        Expr::Ident(name)  => HirExpr::Var(name),
+        Expr::BinOp { op, lhs, rhs } =>
+            HirExpr::BinOp {
+                op:  lower_binop(op),
+                lhs: box(lower_expr(lhs)),
+                rhs: box(lower_expr(rhs)),
+            },
+        Expr::UnaryOp { op, expr } =>
+            HirExpr::UnaryOp {
+                op:   lower_unaryop(op),
+                expr: box(lower_expr(expr)),
+            },
+        Expr::Call { name, args } =>
+            HirExpr::Call {
+                name: name,
+                args: map(args, lower_expr),
+            },
+        Expr::Block(stmts) => lower_block(stmts),
+        Expr::If { cond, then, else_ } =>
+            HirExpr::If {
+                cond:  box(lower_expr(cond)),
+                then:  lower_block_stmts(then),
+                else_: map_option(else_, lower_block_stmts),
+            },
+    }
+}
+
+fn lower_block(stmts: &[Stmt]) -> HirExpr {
+    if is_empty(stmts) { return HirExpr::Nil; }
+    match last(stmts) {
+        Stmt::Return(e) => lower_expr(e),
+        _               => HirExpr::Nil,
+    }
+}
+
+fn lower_block_stmts(expr: &Expr) -> [HirStmt] {
+    match expr {
+        Expr::Block(stmts) => map(stmts, lower_stmt),
+        other              => [HirStmt::ExprStmt(lower_expr(other))],
+    }
+}
+
+fn lower_binop(op: &BinOpKind) -> HirBinOp {
+    match op {
+        BinOpKind::Add => HirBinOp::Add,
+        BinOpKind::Sub => HirBinOp::Sub,
+        BinOpKind::Mul => HirBinOp::Mul,
+        BinOpKind::Div => HirBinOp::Div,
+        BinOpKind::Mod => HirBinOp::Mod,
+        BinOpKind::Eq  => HirBinOp::Eq,
+        BinOpKind::Ne  => HirBinOp::Ne,
+        BinOpKind::Lt  => HirBinOp::Lt,
+        BinOpKind::Le  => HirBinOp::Le,
+        BinOpKind::Gt  => HirBinOp::Gt,
+        BinOpKind::Ge  => HirBinOp::Ge,
+        BinOpKind::And => HirBinOp::And,
+        BinOpKind::Or  => HirBinOp::Or,
+    }
+}
+
+fn lower_unaryop(op: &UnaryOpKind) -> HirUnaryOp {
+    match op {
+        UnaryOpKind::Neg => HirUnaryOp::Neg,
+        UnaryOpKind::Not => HirUnaryOp::Not,
+    }
+}

@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "axon_hir"
+version = "0.51.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_hir — HIR lowering. AXON lowers its own AST. P51."
+license = "Apache-2.0"
+
+[dependencies]
+axon_std_string = { path = "../axon_std/string" }
+axon_lex        = { path = "../axon_lex" }
+axon_parse      = { path = "../axon_parse" }
+
+[dev-dependencies]

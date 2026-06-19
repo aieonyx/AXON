@@ -1,0 +1,68 @@
+// hir.ax -- AXONYX HIR node definitions
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// High-level Intermediate Representation for AXONYX.
+// Mirrored in Rust by hir.rs.
+// P52 type inference fills HirTy::Infer slots.
+
+type HirId = usize;
+
+// HIR type -- Named from source annotation, Infer filled by P52
+enum HirTy {
+    Named(str),
+    Infer,
+}
+
+enum HirBinOp {
+    Add, Sub, Mul, Div, Mod,
+    Eq, Ne, Lt, Le, Gt, Ge,
+    And, Or,
+}
+
+enum HirUnaryOp { Neg, Not }
+
+enum HirExpr {
+    IntLit(i64),
+    FloatLit(f64),
+    StringLit(str),
+    BoolLit(bool),
+    Nil,
+    Var(str),
+    BinOp { op: HirBinOp, lhs: Box<HirExpr>, rhs: Box<HirExpr> },
+    UnaryOp { op: HirUnaryOp, expr: Box<HirExpr> },
+    Call { name: str, args: [HirExpr] },
+    If { cond: Box<HirExpr>, then: [HirStmt], else_: Option<[HirStmt]> },
+}
+
+enum HirStmt {
+    Let { name: str, mutable: bool, ty: HirTy, value: HirExpr },
+    Return(HirExpr),
+    ExprStmt(HirExpr),
+}
+
+struct HirParam { name: str, ty: HirTy }
+struct HirField { name: str, ty: HirTy }
+
+struct HirFn {
+    id:     HirId,
+    name:   str,
+    params: [HirParam],
+    ret:    HirTy,
+    body:   [HirStmt],
+}
+
+struct HirStruct {
+    id:     HirId,
+    name:   str,
+    fields: [HirField],
+}
+
+struct HirProgram {
+    fns:     [HirFn],
+    structs: [HirStruct],
+}
+
+fn hir_program_new() -> HirProgram {
+    HirProgram { fns: [], structs: [] }
+}
