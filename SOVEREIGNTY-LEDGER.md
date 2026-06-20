@@ -27,3 +27,22 @@ No code was copied. All implementations are original.
 
 *"We study the world to build better. We copy nothing."*
 *— Edison Lepiten / AIEONYX, 2026*
+
+---
+
+## DEFERRED PHASES
+
+### P55.7 — Finance CCP Profile + Constant-Time + Sealed Memory
+**Deferred:** 2026-06-20
+**Reason:** Not blocking P56. Features belong naturally in later phases.
+**Return triggers:**
+- `domain Finance` CCP profile → return here when writing first real Finance domain AXONYX app, or at P63 HANIEL domain profiles milestone
+- `@constant_time` codegen → return here at P57 (axon_crypto) — mandatory before any crypto function ships
+- `@sealed_memory` seL4 wiring → return here at P57 (axon_crypto + BASTION PD isolation)
+
+**Contents when you return:**
+1. Add `domain Finance` to CCP profile enum — rejects f32/f64 in Finance-tagged modules
+2. `@constant_time` decorator enforcement in axon_codegen — rejects branches in marked functions
+3. `@sealed_memory` runtime — mlock() on Linux, seL4 PD capability gate on BASTION
+
+**Search tag:** DEFER-P55.7
