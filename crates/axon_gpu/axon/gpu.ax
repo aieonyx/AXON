@@ -1,0 +1,16 @@
+// gpu.ax -- AXONYX sovereign GPU compute specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P58: GPU device, buffer, kernel dispatch.
+struct GpuCapabilities {
+    backend:      str,
+    device_name:  str,
+    vram_bytes:   i64,
+    max_threads:  i64,
+}
+struct GpuDevice { caps: GpuCapabilities }
+struct GpuBuffer { kind: str, len: i64 }
+struct GpuKernel { op: str }
+fn gpu_discover() -> GpuDevice { sovereign }
+fn gpu_buffer_zeros(kind: str, len: i64) -> GpuBuffer { sovereign }
+fn gpu_kernel_dispatch(k: &GpuKernel, inputs: [GpuBuffer], output: &GpuBuffer) -> bool { sovereign }

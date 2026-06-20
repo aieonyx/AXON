@@ -32,6 +32,7 @@ members = [
     "crates/axon_runtime",
     "crates/axon_net",
     "crates/axon_crypto",
+    "crates/axon_gpu",
     "axon_cli",
     "axon_sel4",
     "axon_math",
