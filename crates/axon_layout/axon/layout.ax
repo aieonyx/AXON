@@ -1,0 +1,16 @@
+// layout.ax -- AXONYX sovereign layout specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P60: PRISM layout engine -- box model, text flow, coordinate system.
+struct Point { x: f64, y: f64 }
+struct Size  { width: f64, height: f64 }
+struct Rect  { origin: Point, size: Size }
+struct EdgeSizes { top: f64, right: f64, bottom: f64, left: f64 }
+struct BoxModel  { margin: EdgeSizes, border: EdgeSizes, padding: EdgeSizes, content: Size }
+struct TextStyle { font_size: f64, line_height: f64, char_width: f64 }
+struct TextMetrics { width: f64, height: f64, lines: i64, chars: i64 }
+struct LayoutNode { id: str, children: [LayoutNode] }
+struct ComputedLayout { id: str, rect: Rect, children: [ComputedLayout] }
+fn rect_contains(r: &Rect, p: &Point) -> bool { sovereign }
+fn measure_text(text: str, style: &TextStyle, max_width: f64) -> TextMetrics { sovereign }
+fn compute_layout(node: &LayoutNode, origin: Point, available: Size) -> ComputedLayout { sovereign }

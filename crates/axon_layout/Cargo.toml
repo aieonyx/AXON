@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "axon_layout"
+version = "0.60.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_layout — PRISM sovereign layout engine: box model, text flow, coordinate system"
+license = "Apache-2.0"
+[dependencies]
+[dev-dependencies]
