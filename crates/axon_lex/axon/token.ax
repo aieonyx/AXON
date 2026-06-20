@@ -5,6 +5,8 @@
 // Sovereign source-of-truth for all AXONYX tokens.
 // The Rust token.rs mirrors this file exactly.
 // The TextMate grammar for GitHub Linguist is derived from these definitions.
+//
+// P55.5: v0.3 grammar tokens + sovereign/security/finance primitives added.
 
 enum Token {
     // Literals
@@ -22,6 +24,50 @@ enum Token {
 
     // Sovereign keywords -- AIEONYX extensions
     Sovereign, Capability, Seal, Domain,
+
+    // v0.3 keywords -- grammar feature completion (P55.5)
+    Actor,      // actor concurrency model
+    Handle,     // actor message handler block
+    Intent,     // intent { secure | auditable } blocks
+    Opaque,     // opaque type T = U
+    Foreach,    // foreach stream iteration
+    Yield,      // yield inside foreach
+    Uses,       // uses [capability] effect declarations
+    Tainted,    // provenance type: Tainted<T>
+    Clean,      // provenance type: Clean<T>
+    Secret,     // security type: Secret<T>
+    Auditable,  // sovereignty type: Auditable<T>
+    Expires,    // sovereignty type: Expires<T, after: Duration>
+    Resident,   // sovereignty type: Resident<T, jurisdiction>
+    Money,      // finance type: Money<currency, precision>
+    SafeInt,    // finance type: SafeInt<bounds>
+
+    // v0.3 operators
+    PipeForward,    // |>  pipe with contract markers
+    TildeArrow,     // ~>  morphing type operator
+    CapBang,        // !   capability pin (required)
+    CapQuestion,    // ?   capability pin (optional)
+    At,             // @   decorator prefix
+
+    // Decorator keywords (follow @)
+    DecoratorDeterministic,     // @deterministic
+    DecoratorConstantTime,      // @constant_time
+    DecoratorAiSpecialize,      // @ai.specialize
+    DecoratorAiIntent,          // @ai.intent
+    DecoratorAiVerify,          // @ai.verify
+    DecoratorEnsures,           // @ensures
+    DecoratorRequiresConsent,   // @requires_consent
+    DecoratorSealedMemory,      // @sealed_memory
+    DecoratorBalanced,          // @balanced
+    DecoratorAtomicFinancial,   // @atomic_financial
+    DecoratorModelSigned,       // @model_signed
+    DecoratorInferenceBudget,   // @inference_budget
+    DecoratorRequiresHuman,     // @requires_human_approval
+
+    // Temporal tokens
+    AtNow,      // @now
+    AtLifetime, // @lifetime
+    AtEpoch,    // @epoch
 
     // Arithmetic operators
     Plus, Minus, Star, Slash, Percent,
@@ -65,5 +111,40 @@ fn token_is_sovereign(tok: &Token) -> bool {
         Token::Seal        => true,
         Token::Domain      => true,
         _                  => false,
+    }
+}
+
+// Returns true if this is a v0.3 security/sovereignty/finance type token.
+fn token_is_sovereign_type(tok: &Token) -> bool {
+    match tok {
+        Token::Tainted   => true,
+        Token::Clean     => true,
+        Token::Secret    => true,
+        Token::Auditable => true,
+        Token::Expires   => true,
+        Token::Resident  => true,
+        Token::Money     => true,
+        Token::SafeInt   => true,
+        _                => false,
+    }
+}
+
+// Returns true if this is a decorator token.
+fn token_is_decorator(tok: &Token) -> bool {
+    match tok {
+        Token::DecoratorDeterministic   => true,
+        Token::DecoratorConstantTime    => true,
+        Token::DecoratorAiSpecialize    => true,
+        Token::DecoratorAiIntent        => true,
+        Token::DecoratorAiVerify        => true,
+        Token::DecoratorEnsures         => true,
+        Token::DecoratorRequiresConsent => true,
+        Token::DecoratorSealedMemory    => true,
+        Token::DecoratorBalanced        => true,
+        Token::DecoratorAtomicFinancial => true,
+        Token::DecoratorModelSigned     => true,
+        Token::DecoratorInferenceBudget => true,
+        Token::DecoratorRequiresHuman   => true,
+        _                               => false,
     }
 }

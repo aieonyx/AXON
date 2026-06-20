@@ -88,7 +88,7 @@ pub fn emit_module(hir: &HirProgram, typed: &InferredProgram) -> CodegenResult<S
 
     // Collect function return types for call emission
     for f in &typed.fns {
-        ctx.fn_rets.push((f.name.as_str().to_string(), f.ret_ty.clone()));
+        ctx.fn_rets.push((f.name.clone(), f.ret_ty.clone()));
     }
 
     // Module header
@@ -116,14 +116,14 @@ fn emit_fn(ctx: &mut EmitCtx, f: &HirFn, inf: &InferredFn) -> CodegenResult<()> 
     let params_str: String = f.params.iter()
         .map(|p| {
             let ty = axon_infer::ty_from_hir(&p.ty);
-            ctx.params.push((p.name.as_str().to_string(), ty.clone()));
-            format!("{} %{}", ty_str(&ty), p.name.as_str())
+            ctx.params.push((p.name.clone(), ty.clone()));
+            format!("{} %{}", ty_str(&ty), p.name)
         })
         .collect::<Vec<_>>()
         .join(", ");
 
     let ret_str = ty_str(&inf.ret_ty);
-    ctx.line(&format!("define {} @{}({}) {{", ret_str, f.name.as_str(), params_str));
+    ctx.line(&format!("define {} @{}({}) {{", ret_str, f.name, params_str));
     ctx.line("entry:");
 
     for stmt in &f.body {
@@ -142,10 +142,10 @@ fn emit_stmt(ctx: &mut EmitCtx, stmt: &HirStmt) -> CodegenResult<()> {
         HirStmt::Let { name, value, .. } => {
             let (val, ty) = emit_expr(ctx, value)?;
             let ir_ty     = ty_str(&ty);
-            let slot      = format!("%{}_slot", name.as_str());
+            let slot      = format!("%{}_slot", name);
             ctx.line(&format!("  {} = alloca {}", slot, ir_ty));
             ctx.line(&format!("  store {} {}, {}* {}", ir_ty, val, ir_ty, slot));
-            ctx.allocas.push((name.as_str().to_string(), slot, ty));
+            ctx.allocas.push((name.clone(), slot, ty));
             Ok(())
         }
         HirStmt::Return(expr) => {
@@ -159,6 +159,16 @@ fn emit_stmt(ctx: &mut EmitCtx, stmt: &HirStmt) -> CodegenResult<()> {
         }
         HirStmt::ExprStmt(expr) => {
             emit_expr(ctx, expr)?;
+            Ok(())
+        }
+        // P55.5: ephemeral binding — same as Let for codegen purposes
+        HirStmt::LetAt { name, value, .. } => {
+            let (val, ty) = emit_expr(ctx, value)?;
+            let ir_ty     = ty_str(&ty);
+            let slot      = format!("%{}_slot", name);
+            ctx.line(&format!("  {} = alloca {}", slot, ir_ty));
+            ctx.line(&format!("  store {} {}, {}* {}", ir_ty, val, ir_ty, slot));
+            ctx.allocas.push((name.clone(), slot, ty));
             Ok(())
         }
     }
@@ -178,17 +188,17 @@ fn emit_expr(ctx: &mut EmitCtx, expr: &HirExpr) -> CodegenResult<(String, Ty)> {
 
         HirExpr::Var(name) => {
             // Params: direct register value, no load needed
-            if let Some(ty) = ctx.lookup_param(name.as_str()) {
+            if let Some(ty) = ctx.lookup_param(name) {
                 return Ok((format!("%{}", name.as_str()), ty));
             }
             // Let bindings: load from alloca slot
-            if let Some((slot, ty)) = ctx.lookup_alloca(name.as_str()) {
+            if let Some((slot, ty)) = ctx.lookup_alloca(name) {
                 let ir_ty    = ty_str(&ty);
                 let load_reg = ctx.fresh_reg();
                 ctx.line(&format!("  {} = load {}, {}* {}", load_reg, ir_ty, ir_ty, slot));
                 return Ok((load_reg, ty));
             }
-            Err(CodegenError::UndefinedName(AxString::ax_from_str(name.as_str())))
+            Err(CodegenError::UndefinedName(AxString::ax_from_str(name)))
         }
 
         HirExpr::BinOp { op, lhs, rhs } => {
@@ -238,16 +248,16 @@ fn emit_expr(ctx: &mut EmitCtx, expr: &HirExpr) -> CodegenResult<(String, Ty)> {
                 let (val, ty) = emit_expr(ctx, arg)?;
                 arg_strs.push(format!("{} {}", ty_str(&ty), val));
             }
-            let ret_ty   = ctx.lookup_fn_ret(name.as_str());
+            let ret_ty   = ctx.lookup_fn_ret(name);
             let args_str = arg_strs.join(", ");
 
             if ret_ty == Ty::Nil {
-                ctx.line(&format!("  call void @{}({})", name.as_str(), args_str));
+                ctx.line(&format!("  call void @{}({})", name, args_str));
                 Ok(("".to_string(), Ty::Nil))
             } else {
                 let result = ctx.fresh_reg();
                 ctx.line(&format!("  {} = call {} @{}({})",
-                    result, ty_str(&ret_ty), name.as_str(), args_str));
+                    result, ty_str(&ret_ty), name, args_str));
                 Ok((result, ret_ty))
             }
         }
@@ -264,6 +274,20 @@ fn emit_expr(ctx: &mut EmitCtx, expr: &HirExpr) -> CodegenResult<(String, Ty)> {
                     emit_stmt(ctx, stmt)?;
                 }
             }
+            Ok(("".to_string(), Ty::Nil))
+        }
+        // P55.5: v0.3 nodes — runtime semantics land in P55.6/P57
+        HirExpr::Pipe { lhs, .. }       => emit_expr(ctx, lhs),
+        HirExpr::Morph { expr, .. }     => emit_expr(ctx, expr),
+        HirExpr::CapPinCall { expr, .. }=> emit_expr(ctx, expr),
+        HirExpr::Temporal(_)            => Ok(("0".to_string(), Ty::I64)),
+        HirExpr::Foreach { body, .. }   => {
+            for stmt in body { emit_stmt(ctx, stmt)?; }
+            Ok(("".to_string(), Ty::Nil))
+        }
+        HirExpr::Yield(expr)            => emit_expr(ctx, expr),
+        HirExpr::IntentBlock { body, .. } => {
+            for stmt in body { emit_stmt(ctx, stmt)?; }
             Ok(("".to_string(), Ty::Nil))
         }
     }

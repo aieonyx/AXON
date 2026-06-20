@@ -3,15 +3,14 @@
 //
 // Rust parser bridge — mirrors parse.ax and token_stream.ax exactly.
 // Excised at P55 bootstrap when axonc compiles parse.ax natively.
+// P55.5: updated for SovereignTy, Decorator, uses, LetAt, Actor.
 
-use axon_lex::Token;
+use axon_lex::{Token, token::token_is_trivia};
 use axon_std_string::AxString;
 use crate::ast::*;
 use crate::error::{ParseError, ParseResult};
 
 const MAX_DEPTH: usize = 128;
-
-// ── Token stream cursor — mirrors token_stream.ax ─────────────────────────────
 
 pub struct TokenStream {
     tokens: Vec<Token>,
@@ -21,10 +20,9 @@ pub struct TokenStream {
 
 impl TokenStream {
     pub fn new(tokens: Vec<Token>) -> Self {
-        // Filter trivia — parser never sees whitespace or comments
         let tokens: Vec<Token> = tokens
             .into_iter()
-            .filter(|t| !t.is_trivia())
+            .filter(|t| !token_is_trivia(t))
             .collect();
         TokenStream { tokens, pos: 0, depth: 0 }
     }
@@ -35,9 +33,7 @@ impl TokenStream {
 
     pub fn advance(&mut self) -> &Token {
         let tok = self.tokens.get(self.pos).unwrap_or(&Token::Eof);
-        if self.pos < self.tokens.len() {
-            self.pos += 1;
-        }
+        if self.pos < self.tokens.len() { self.pos += 1; }
         tok
     }
 
@@ -52,7 +48,7 @@ impl TokenStream {
         }
     }
 
-    pub fn expect_ident(&mut self) -> ParseResult<AxString> {
+    pub fn expect_ident(&mut self) -> ParseResult<String> {
         match self.peek().clone() {
             Token::Ident(name) => { self.advance(); Ok(name) }
             other => Err(ParseError::UnexpectedToken(
@@ -61,25 +57,16 @@ impl TokenStream {
         }
     }
 
-    pub fn is_eof(&self) -> bool {
-        matches!(self.peek(), Token::Eof)
-    }
+    pub fn is_eof(&self) -> bool { matches!(self.peek(), Token::Eof) }
 
     fn enter(&mut self) -> ParseResult<()> {
         self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            Err(ParseError::MaxDepthExceeded)
-        } else {
-            Ok(())
-        }
+        if self.depth > MAX_DEPTH { Err(ParseError::MaxDepthExceeded) }
+        else { Ok(()) }
     }
 
-    fn exit(&mut self) {
-        if self.depth > 0 { self.depth -= 1; }
-    }
+    fn exit(&mut self) { if self.depth > 0 { self.depth -= 1; } }
 }
-
-// ── Public entry point ────────────────────────────────────────────────────────
 
 pub fn parse(source: &str) -> ParseResult<Program> {
     let tokens = axon_lex::lex_all(source)
@@ -90,13 +77,9 @@ pub fn parse(source: &str) -> ParseResult<Program> {
     parse_program(&mut stream)
 }
 
-// ── Grammar rules — each mirrors a function in parse.ax ──────────────────────
-
 fn parse_program(s: &mut TokenStream) -> ParseResult<Program> {
     let mut items = Vec::new();
-    while !s.is_eof() {
-        items.push(parse_item(s)?);
-    }
+    while !s.is_eof() { items.push(parse_item(s)?); }
     Ok(Program { items })
 }
 
@@ -117,16 +100,21 @@ fn parse_fn(s: &mut TokenStream) -> ParseResult<Item> {
     let params = parse_params(s)?;
     s.expect(&Token::RParen)?;
     s.expect(&Token::Arrow)?;
-    let ret = parse_type_expr(s)?;
+    let ret = parse_sovereign_ty(s)?;
     let body = parse_block_stmts(s)?;
-    Ok(Item::Fn { name, params, ret, body })
+    Ok(Item::Fn {
+        decorators: vec![],
+        name,
+        uses: vec![],
+        params,
+        ret,
+        body,
+    })
 }
 
 fn parse_params(s: &mut TokenStream) -> ParseResult<Vec<Param>> {
     let mut params = Vec::new();
-    if matches!(s.peek(), Token::RParen) {
-        return Ok(params);
-    }
+    if matches!(s.peek(), Token::RParen) { return Ok(params); }
     params.push(parse_param(s)?);
     while matches!(s.peek(), Token::Comma) {
         s.advance();
@@ -139,7 +127,7 @@ fn parse_params(s: &mut TokenStream) -> ParseResult<Vec<Param>> {
 fn parse_param(s: &mut TokenStream) -> ParseResult<Param> {
     let name = s.expect_ident()?;
     s.expect(&Token::Colon)?;
-    let ty = parse_type_expr(s)?;
+    let ty = parse_sovereign_ty(s)?;
     Ok(Param { name, ty })
 }
 
@@ -157,15 +145,41 @@ fn parse_fields(s: &mut TokenStream) -> ParseResult<Vec<Field>> {
     while !matches!(s.peek(), Token::RBrace | Token::Eof) {
         let name = s.expect_ident()?;
         s.expect(&Token::Colon)?;
-        let ty = parse_type_expr(s)?;
+        let ty = parse_sovereign_ty(s)?;
         fields.push(Field { name, ty });
         if matches!(s.peek(), Token::Comma) { s.advance(); }
     }
     Ok(fields)
 }
 
-fn parse_type_expr(s: &mut TokenStream) -> ParseResult<TypeExpr> {
+// Parse a type expression — returns SovereignTy::Plain for base types.
+// P55.5: recognises sovereign type wrappers by keyword token.
+fn parse_sovereign_ty(s: &mut TokenStream) -> ParseResult<SovereignTy> {
+    match s.peek().clone() {
+        Token::Tainted   => { s.advance(); Ok(SovereignTy::Tainted(Box::new(parse_inner_ty(s)?))) }
+        Token::Clean     => { s.advance(); Ok(SovereignTy::Clean(Box::new(parse_inner_ty(s)?))) }
+        Token::Secret    => { s.advance(); Ok(SovereignTy::Secret(Box::new(parse_inner_ty(s)?))) }
+        Token::Auditable => { s.advance(); Ok(SovereignTy::Auditable(Box::new(parse_inner_ty(s)?))) }
+        Token::Money     => {
+            s.advance();
+            Ok(SovereignTy::Money { currency: "EUR".to_string(), precision: 2 })
+        }
+        Token::SafeInt   => {
+            s.advance();
+            Ok(SovereignTy::SafeInt { lo: 0, hi: i64::MAX })
+        }
+        _ => {
+            let name = s.expect_ident()?;
+            Ok(SovereignTy::Plain(TypeExpr { name }))
+        }
+    }
+}
+
+fn parse_inner_ty(s: &mut TokenStream) -> ParseResult<TypeExpr> {
+    // Expects <Type> — skip angle brackets if present
+    if matches!(s.peek(), Token::Lt) { s.advance(); }
     let name = s.expect_ident()?;
+    if matches!(s.peek(), Token::Gt) { s.advance(); }
     Ok(TypeExpr { name })
 }
 
@@ -189,15 +203,9 @@ fn parse_stmt(s: &mut TokenStream) -> ParseResult<Stmt> {
 
 fn parse_let(s: &mut TokenStream) -> ParseResult<Stmt> {
     s.advance(); // consume let
-    let mutable = if matches!(s.peek(), Token::Mut) {
-        s.advance(); true
-    } else { false };
+    let mutable = if matches!(s.peek(), Token::Mut) { s.advance(); true } else { false };
     let name = s.expect_ident()?;
-    // Skip optional type annotation: ": type"
-    if matches!(s.peek(), Token::Colon) {
-        s.advance();
-        parse_type_expr(s)?;
-    }
+    if matches!(s.peek(), Token::Colon) { s.advance(); parse_sovereign_ty(s)?; }
     s.expect(&Token::Eq)?;
     let value = parse_expr(s)?;
     s.expect(&Token::Semi)?;
@@ -205,7 +213,7 @@ fn parse_let(s: &mut TokenStream) -> ParseResult<Stmt> {
 }
 
 fn parse_return(s: &mut TokenStream) -> ParseResult<Stmt> {
-    s.advance(); // consume return
+    s.advance();
     let expr = parse_expr(s)?;
     s.expect(&Token::Semi)?;
     Ok(Stmt::Return(expr))
@@ -213,15 +221,10 @@ fn parse_return(s: &mut TokenStream) -> ParseResult<Stmt> {
 
 fn parse_expr_stmt(s: &mut TokenStream) -> ParseResult<Stmt> {
     let expr = parse_expr(s)?;
-    // Block-like expressions (if, block) do not require a trailing semicolon
     let needs_semi = !matches!(expr, Expr::If { .. } | Expr::Block(_));
-    if needs_semi {
-        s.expect(&Token::Semi)?;
-    }
+    if needs_semi { s.expect(&Token::Semi)?; }
     Ok(Stmt::ExprStmt(expr))
 }
-
-// ── Expression parsing — precedence climbing ──────────────────────────────────
 
 fn parse_expr(s: &mut TokenStream) -> ParseResult<Expr> {
     s.enter()?;
@@ -234,13 +237,12 @@ fn parse_equality(s: &mut TokenStream) -> ParseResult<Expr> {
     let mut lhs = parse_comparison(s)?;
     loop {
         let op = match s.peek() {
-            Token::EqEq  => BinOpKind::Eq,
+            Token::EqEq   => BinOpKind::Eq,
             Token::BangEq => BinOpKind::Ne,
             _ => break,
         };
         s.advance();
-        let rhs = parse_comparison(s)?;
-        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(rhs) };
+        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(parse_comparison(s)?) };
     }
     Ok(lhs)
 }
@@ -256,8 +258,7 @@ fn parse_comparison(s: &mut TokenStream) -> ParseResult<Expr> {
             _ => break,
         };
         s.advance();
-        let rhs = parse_term(s)?;
-        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(rhs) };
+        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(parse_term(s)?) };
     }
     Ok(lhs)
 }
@@ -271,8 +272,7 @@ fn parse_term(s: &mut TokenStream) -> ParseResult<Expr> {
             _ => break,
         };
         s.advance();
-        let rhs = parse_factor(s)?;
-        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(rhs) };
+        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(parse_factor(s)?) };
     }
     Ok(lhs)
 }
@@ -287,15 +287,14 @@ fn parse_factor(s: &mut TokenStream) -> ParseResult<Expr> {
             _ => break,
         };
         s.advance();
-        let rhs = parse_unary(s)?;
-        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(rhs) };
+        lhs = Expr::BinOp { op, lhs: Box::new(lhs), rhs: Box::new(parse_unary(s)?) };
     }
     Ok(lhs)
 }
 
 fn parse_unary(s: &mut TokenStream) -> ParseResult<Expr> {
     match s.peek() {
-        Token::Bang  => { s.advance(); Ok(Expr::UnaryOp { op: UnaryOpKind::Not, expr: Box::new(parse_unary(s)?) }) }
+        Token::Bang  => { s.advance(); Ok(Expr::UnaryOp { op: UnaryOpKind::Not,  expr: Box::new(parse_unary(s)?) }) }
         Token::Minus => { s.advance(); Ok(Expr::UnaryOp { op: UnaryOpKind::Neg, expr: Box::new(parse_unary(s)?) }) }
         _ => parse_call(s),
     }
@@ -303,11 +302,10 @@ fn parse_unary(s: &mut TokenStream) -> ParseResult<Expr> {
 
 fn parse_call(s: &mut TokenStream) -> ParseResult<Expr> {
     let primary = parse_primary(s)?;
-    // Check if this is a function call: Ident followed by "("
     if let Expr::Ident(ref name) = primary {
         if matches!(s.peek(), Token::LParen) {
             let name = name.clone();
-            s.advance(); // consume "("
+            s.advance();
             let args = parse_args(s)?;
             s.expect(&Token::RParen)?;
             return Ok(Expr::Call { name, args });
@@ -318,9 +316,7 @@ fn parse_call(s: &mut TokenStream) -> ParseResult<Expr> {
 
 fn parse_args(s: &mut TokenStream) -> ParseResult<Vec<Expr>> {
     let mut args = Vec::new();
-    if matches!(s.peek(), Token::RParen) {
-        return Ok(args);
-    }
+    if matches!(s.peek(), Token::RParen) { return Ok(args); }
     args.push(parse_expr(s)?);
     while matches!(s.peek(), Token::Comma) {
         s.advance();
@@ -331,34 +327,27 @@ fn parse_args(s: &mut TokenStream) -> ParseResult<Vec<Expr>> {
 }
 
 fn parse_if(s: &mut TokenStream) -> ParseResult<Expr> {
-    s.advance(); // consume if
+    s.advance();
     let cond = parse_expr(s)?;
     let then_stmts = parse_block_stmts(s)?;
     let then = Expr::Block(then_stmts);
     let else_ = if matches!(s.peek(), Token::Else) {
         s.advance();
-        let else_stmts = parse_block_stmts(s)?;
-        Some(Box::new(Expr::Block(else_stmts)))
-    } else {
-        None
-    };
-    Ok(Expr::If {
-        cond: Box::new(cond),
-        then: Box::new(then),
-        else_,
-    })
+        Some(Box::new(Expr::Block(parse_block_stmts(s)?)))
+    } else { None };
+    Ok(Expr::If { cond: Box::new(cond), then: Box::new(then), else_ })
 }
 
 fn parse_primary(s: &mut TokenStream) -> ParseResult<Expr> {
     match s.peek().clone() {
-        Token::IntLit(n)       => { s.advance(); Ok(Expr::IntLit(n)) }
-        Token::FloatLit(f)     => { s.advance(); Ok(Expr::FloatLit(f)) }
-        Token::StringLit(st)   => { s.advance(); Ok(Expr::StringLit(st)) }
-        Token::BoolLit(b)      => { s.advance(); Ok(Expr::BoolLit(b)) }
-        Token::Nil             => { s.advance(); Ok(Expr::Nil) }
-        Token::Ident(name)     => { s.advance(); Ok(Expr::Ident(name)) }
-        Token::If              => parse_if(s),
-        Token::LParen          => {
+        Token::IntLit(n)     => { s.advance(); Ok(Expr::IntLit(n)) }
+        Token::FloatLit(f)   => { s.advance(); Ok(Expr::FloatLit(f)) }
+        Token::StringLit(st) => { s.advance(); Ok(Expr::StringLit(st)) }
+        Token::BoolLit(b)    => { s.advance(); Ok(Expr::BoolLit(b)) }
+        Token::Nil           => { s.advance(); Ok(Expr::Nil) }
+        Token::Ident(name)   => { s.advance(); Ok(Expr::Ident(name)) }
+        Token::If            => parse_if(s),
+        Token::LParen        => {
             s.advance();
             let expr = parse_expr(s)?;
             s.expect(&Token::RParen)?;

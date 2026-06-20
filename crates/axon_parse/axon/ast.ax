@@ -4,7 +4,7 @@
 //
 // Sovereign source-of-truth for AXONYX AST nodes.
 // Mirrored in Rust by ast.rs.
-// P51 HIR lowering builds directly on these definitions.
+// P55.5: v0.3 grammar nodes + sovereign/security/finance AST nodes.
 
 enum BinOpKind {
     Add, Sub, Mul, Div, Mod,
@@ -14,19 +14,63 @@ enum BinOpKind {
 
 enum UnaryOpKind { Neg, Not }
 
+// Base type expression
 struct TypeExpr {
     name: str,
 }
 
+// v0.3 sovereign type wrappers
+enum SovereignTy {
+    Tainted(Box<TypeExpr>),                        // Tainted<T>
+    Clean(Box<TypeExpr>),                          // Clean<T>
+    Secret(Box<TypeExpr>),                         // Secret<T>
+    Auditable(Box<TypeExpr>),                      // Auditable<T>
+    Expires { inner: Box<TypeExpr>, after: str },  // Expires<T, after: Duration>
+    Resident { inner: Box<TypeExpr>, jurisdiction: str }, // Resident<T, "EU">
+    Money { currency: str, precision: i64 },       // Money<"EUR", 2>
+    SafeInt { lo: i64, hi: i64 },                 // SafeInt<0..MAX>
+    Refinement { base: Box<TypeExpr>, pred: str }, // Int { _ > 0 }
+    Opaque { name: str, inner: Box<TypeExpr> },    // opaque type T = U
+    Plain(TypeExpr),
+}
+
+// Decorator node
+enum Decorator {
+    Deterministic,
+    ConstantTime,
+    AiSpecialize(str),
+    AiIntent(str),
+    AiVerify { pre: str, post: str, invariant: str },
+    Ensures(str),
+    RequiresConsent { user_id: str, purpose: str },
+    SealedMemory,
+    Balanced,
+    AtomicFinancial,
+    ModelSigned(str),
+    InferenceBudget { tokens: i64, time_ms: i64 },
+    RequiresHumanApproval(str),
+}
+
 struct Param {
     name: str,
-    ty:   TypeExpr,
+    ty:   SovereignTy,
 }
 
 struct Field {
     name: str,
-    ty:   TypeExpr,
+    ty:   SovereignTy,
 }
+
+// Actor handle block
+struct HandleBlock {
+    msg_name: str,
+    msg_ty:   SovereignTy,
+    ret_ty:   SovereignTy,
+    body:     [Stmt],
+}
+
+// Capability pin kind
+enum CapPin { Required, Optional }
 
 enum Expr {
     IntLit(i64),
@@ -40,17 +84,37 @@ enum Expr {
     Call { name: str, args: [Expr] },
     Block([Stmt]),
     If { cond: Box<Expr>, then: Box<Expr>, else_: Option<Box<Expr>> },
+
+    // v0.3 expressions
+    Pipe { lhs: Box<Expr>, rhs: Box<Expr>, contract: Option<str> }, // |>
+    Morph { expr: Box<Expr>, method: str },                         // ~>
+    CapPinCall { expr: Box<Expr>, method: str, pin: CapPin },       // expr!m() / expr?m()
+    Temporal(TemporalKind),                                          // @now @lifetime @epoch
+    Foreach { var: str, gen: Box<Expr>, body: [Stmt] },             // foreach x in gen
+    Yield(Box<Expr>),                                               // yield expr
+    IntentBlock { modes: [str], body: [Stmt] },                     // intent { secure | auditable }
 }
+
+enum TemporalKind { Now, Lifetime, Epoch }
 
 enum Stmt {
     Let { name: str, mutable: bool, value: Expr },
+    LetAt { name: str, value: Expr },            // let@ ephemeral binding
     Return(Expr),
     ExprStmt(Expr),
 }
 
 enum Item {
-    Fn { name: str, params: [Param], ret: TypeExpr, body: [Stmt] },
+    Fn {
+        decorators: [Decorator],
+        name:       str,
+        uses:       [str],          // uses [capability] effect declarations
+        params:     [Param],
+        ret:        SovereignTy,
+        body:       [Stmt],
+    },
     Struct { name: str, fields: [Field] },
+    Actor  { name: str, handles: [HandleBlock] }, // actor concurrency
 }
 
 struct Program {

@@ -4,6 +4,7 @@
 // Top-level type inference pass — mirrors constraint.ax logic.
 // Two-pass: collect signatures, then infer bodies.
 // Excised at P55 bootstrap when axonc compiles the .ax sources natively.
+// P55.5: String throughout; new HirStmt/HirExpr variants handled.
 
 use axon_hir::{
     HirBinOp, HirExpr, HirFn, HirProgram, HirStmt, HirTy, HirUnaryOp,
@@ -15,16 +16,14 @@ use crate::unify::unify_types;
 
 // ── Output types ──────────────────────────────────────────────────────────────
 
-/// Inference result for a single function.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InferredFn {
-    pub name:     AxString,
+    pub name:     String,
     pub ret_ty:   Ty,
-    pub var_tys:  Vec<(AxString, Ty)>,  // let bindings: name → inferred type
-    pub stmt_tys: Vec<Ty>,              // inferred type of each statement
+    pub var_tys:  Vec<(String, Ty)>,
+    pub stmt_tys: Vec<Ty>,
 }
 
-/// Inference result for a full program.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InferredProgram {
     pub fns: Vec<InferredFn>,
@@ -33,11 +32,8 @@ pub struct InferredProgram {
 // ── Inference context ─────────────────────────────────────────────────────────
 
 struct InferCtx {
-    /// Variable bindings (stack — most recent last, for shadowing)
-    var_env: Vec<(AxString, Ty)>,
-    /// Function signatures: name → (param_tys, ret_ty)
-    fn_env:  Vec<(AxString, Vec<Ty>, Ty)>,
-    /// Current function's declared return type
+    var_env: Vec<(String, Ty)>,
+    fn_env:  Vec<(String, Vec<Ty>, Ty)>,
     ret_ty:  Ty,
 }
 
@@ -46,14 +42,16 @@ impl InferCtx {
         InferCtx { var_env: Vec::new(), fn_env: Vec::new(), ret_ty: Ty::Unknown }
     }
 
-    fn lookup_var(&self, name: &AxString) -> InferResult<Ty> {
+    fn lookup_var(&self, name: &str) -> InferResult<Ty> {
         for (n, ty) in self.var_env.iter().rev() {
             if n == name { return Ok(ty.clone()); }
         }
-        Err(InferError::UndefinedName(name.clone()))
+        Err(InferError::UndefinedName(
+            AxString::ax_from_str(name)
+        ))
     }
 
-    fn lookup_fn(&self, name: &AxString) -> (Vec<Ty>, Ty) {
+    fn lookup_fn(&self, name: &str) -> (Vec<Ty>, Ty) {
         for (n, params, ret) in &self.fn_env {
             if n == name { return (params.clone(), ret.clone()); }
         }
@@ -63,7 +61,6 @@ impl InferCtx {
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
-/// Infer types from an AXON source string.
 pub fn infer_source(source: &str) -> InferResult<InferredProgram> {
     let ast = axon_parse::parse(source).map_err(|e| {
         InferError::PipelineError(AxString::ax_from_str(&format!("parse: {}", e)))
@@ -74,7 +71,6 @@ pub fn infer_source(source: &str) -> InferResult<InferredProgram> {
     infer_program(&hir)
 }
 
-/// Infer types from a HirProgram.
 pub fn infer_program(hir: &HirProgram) -> InferResult<InferredProgram> {
     let mut ctx = InferCtx::new();
 
@@ -99,13 +95,12 @@ fn infer_fn(ctx: &mut InferCtx, f: &HirFn) -> InferResult<InferredFn> {
     ctx.var_env.clear();
     ctx.ret_ty = ty_from_hir(&f.ret);
 
-    // Bind parameters into the variable environment
     for p in &f.params {
         ctx.var_env.push((p.name.clone(), ty_from_hir(&p.ty)));
     }
 
-    let mut var_tys:  Vec<(AxString, Ty)> = Vec::new();
-    let mut stmt_tys: Vec<Ty>             = Vec::new();
+    let mut var_tys:  Vec<(String, Ty)> = Vec::new();
+    let mut stmt_tys: Vec<Ty>           = Vec::new();
 
     for stmt in &f.body {
         let (stmt_ty, new_bindings) = infer_stmt(ctx, stmt)?;
@@ -125,9 +120,9 @@ fn infer_fn(ctx: &mut InferCtx, f: &HirFn) -> InferResult<InferredFn> {
 }
 
 fn infer_stmt(
-    ctx: &mut InferCtx,
+    ctx:  &mut InferCtx,
     stmt: &HirStmt,
-) -> InferResult<(Ty, Vec<(AxString, Ty)>)> {
+) -> InferResult<(Ty, Vec<(String, Ty)>)> {
     match stmt {
         HirStmt::Let { name, ty: hir_ty, value, .. } => {
             let val_ty = infer_expr(ctx, value)?;
@@ -137,7 +132,20 @@ fn infer_stmt(
                     unify_types(&expected, &val_ty)?;
                     expected
                 }
-                HirTy::Infer => val_ty.clone(),
+                _ => val_ty.clone(),
+            };
+            Ok((resolved.clone(), vec![(name.clone(), resolved)]))
+        }
+        // P55.5: ephemeral binding — inferred same as Let
+        HirStmt::LetAt { name, ty: hir_ty, value } => {
+            let val_ty = infer_expr(ctx, value)?;
+            let resolved = match hir_ty {
+                HirTy::Named(n) => {
+                    let expected = ty_from_name(n);
+                    unify_types(&expected, &val_ty)?;
+                    expected
+                }
+                _ => val_ty.clone(),
             };
             Ok((resolved.clone(), vec![(name.clone(), resolved)]))
         }
@@ -167,10 +175,10 @@ fn infer_expr(ctx: &mut InferCtx, expr: &HirExpr) -> InferResult<Ty> {
             let rhs_ty = infer_expr(ctx, rhs.as_ref())?;
             unify_types(&lhs_ty, &rhs_ty)?;
             Ok(match op {
-                HirBinOp::Eq  | HirBinOp::Ne  |
-                HirBinOp::Lt  | HirBinOp::Le  |
-                HirBinOp::Gt  | HirBinOp::Ge  |
-                HirBinOp::And | HirBinOp::Or  => Ty::Bool,
+                HirBinOp::Eq  | HirBinOp::Ne |
+                HirBinOp::Lt  | HirBinOp::Le |
+                HirBinOp::Gt  | HirBinOp::Ge |
+                HirBinOp::And | HirBinOp::Or => Ty::Bool,
                 _ => lhs_ty,
             })
         }
@@ -194,14 +202,30 @@ fn infer_expr(ctx: &mut InferCtx, expr: &HirExpr) -> InferResult<Ty> {
         HirExpr::If { cond, then, else_ } => {
             let cond_ty = infer_expr(ctx, cond.as_ref())?;
             unify_types(&cond_ty, &Ty::Bool)?;
-            for stmt in then {
-                infer_stmt(ctx, stmt)?;
-            }
+            for stmt in then { infer_stmt(ctx, stmt)?; }
             if let Some(else_stmts) = else_ {
-                for stmt in else_stmts {
-                    infer_stmt(ctx, stmt)?;
-                }
+                for stmt in else_stmts { infer_stmt(ctx, stmt)?; }
             }
+            Ok(Ty::Nil)
+        }
+        // P55.5: v0.3 expression nodes — type-checked structurally
+        HirExpr::Pipe { lhs, rhs, .. } => {
+            infer_expr(ctx, lhs)?;
+            infer_expr(ctx, rhs)
+        }
+        HirExpr::Morph { expr, .. } => infer_expr(ctx, expr),
+        HirExpr::CapPinCall { expr, .. } => infer_expr(ctx, expr),
+        HirExpr::Temporal(_) => Ok(Ty::I64), // timestamps as i64 epoch ms
+        HirExpr::Foreach { gen, body, var } => {
+            let gen_ty = infer_expr(ctx, gen)?;
+            ctx.var_env.push((var.clone(), gen_ty));
+            for stmt in body { infer_stmt(ctx, stmt)?; }
+            ctx.var_env.pop();
+            Ok(Ty::Nil)
+        }
+        HirExpr::Yield(expr) => infer_expr(ctx, expr),
+        HirExpr::IntentBlock { body, .. } => {
+            for stmt in body { infer_stmt(ctx, stmt)?; }
             Ok(Ty::Nil)
         }
     }

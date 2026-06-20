@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // P50 QA -- axon_parse test suite
 // Pass bar: 12/12 before P51 begins.
+// P55.5: AxString -> String; TypeExpr -> SovereignTy::Plain.
 
 use axon_parse::{
     parse, BinOpKind, Expr, Item, Param,
-    Stmt, TypeExpr,
+    Stmt, TypeExpr, SovereignTy,
 };
-use axon_std_string::AxString;
 
-fn ax(s: &str) -> AxString { AxString::ax_from_str(s) }
-fn ty(s: &str) -> TypeExpr { TypeExpr { name: ax(s) } }
+fn s(v: &str) -> String { v.to_string() }
+fn ty(v: &str) -> SovereignTy { SovereignTy::Plain(TypeExpr { name: v.to_string() }) }
 
 // T1: empty input yields empty Program
 #[test]
@@ -124,8 +124,8 @@ fn test_parse_fn_decl() {
     if let Item::Fn { name, params, ret, .. } = &prog.items[0] {
         assert_eq!(name.as_str(), "add");
         assert_eq!(params.len(), 2);
-        assert_eq!(params[0], Param { name: ax("a"), ty: ty("i32") });
-        assert_eq!(params[1], Param { name: ax("b"), ty: ty("i32") });
+        assert_eq!(params[0], Param { name: s("a"), ty: ty("i32") });
+        assert_eq!(params[1], Param { name: s("b"), ty: ty("i32") });
         assert_eq!(*ret, ty("i32"));
         return;
     }
@@ -155,7 +155,7 @@ fn test_parse_if_expr() {
     let prog = parse(src).unwrap();
     if let Item::Fn { body, .. } = &prog.items[0] {
         if let Stmt::ExprStmt(Expr::If { cond, then, else_ }) = &body[0] {
-            assert_eq!(**cond, Expr::Ident(ax("x")));
+            assert_eq!(**cond, Expr::Ident("x".to_string()));
             assert!(matches!(**then, Expr::Block(_)));
             assert!(else_.is_some());
             return;

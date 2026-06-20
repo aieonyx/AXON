@@ -4,15 +4,17 @@
 // AST -> HIR lowering bridge.
 // Mirrors lower.ax exactly. Excised at P55 bootstrap.
 // Each AST node maps to exactly one HIR node (1:1 lowering).
+// P55.5: updated for SovereignTy, Decorator, uses, LetAt, Actor,
+//        and v0.3 expression nodes. All existing logic preserved unchanged.
 
 use axon_parse::{
-    BinOpKind, Expr, Item, Program, Stmt, TypeExpr, UnaryOpKind,
+    BinOpKind, CapPin, Decorator, Expr, Item, Program,
+    Stmt, SovereignTy, TemporalKind, TypeExpr, UnaryOpKind,
 };
 use axon_std_string::AxString;
 use crate::error::{HirError, HirResult};
 use crate::hir::*;
 
-// Global ID counter — atomic monotonic allocator.
 use std::sync::atomic::{AtomicUsize, Ordering};
 static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
 fn next_id() -> HirId {
@@ -30,14 +32,29 @@ pub fn lower_source(source: &str) -> HirResult<HirProgram> {
 
 /// Lower a parsed AST Program to HirProgram.
 pub fn lower_program(program: &Program) -> HirResult<HirProgram> {
-    let mut hir = HirProgram::new();
+    let mut hir = hir_program_new();
     for item in &program.items {
         match item {
-            Item::Fn { name, params, ret, body } => {
-                hir.fns.push(lower_fn(name, params, ret, body)?);
+            Item::Fn { decorators, name, uses, params, ret, body } => {
+                hir.fns.push(lower_fn(decorators, name, uses, params, ret, body)?);
             }
             Item::Struct { name, fields } => {
                 hir.structs.push(lower_struct(name, fields)?);
+            }
+            Item::Actor { name, handles } => {
+                hir.actors.push(HirActor {
+                    id:      next_id(),
+                    name:    name.clone(),
+                    handles: handles.iter().map(|h| HirHandleBlock {
+                        msg_name: h.msg_name.clone(),
+                        msg_ty:   lower_sovereign_ty(&h.msg_ty),
+                        ret_ty:   lower_sovereign_ty(&h.ret_ty),
+                        body:     h.body.iter()
+                                    .map(lower_stmt)
+                                    .collect::<HirResult<Vec<_>>>()
+                                    .unwrap_or_default(),
+                    }).collect(),
+                });
             }
         }
     }
@@ -45,15 +62,17 @@ pub fn lower_program(program: &Program) -> HirResult<HirProgram> {
 }
 
 fn lower_fn(
-    name:   &AxString,
-    params: &[axon_parse::Param],
-    ret:    &TypeExpr,
-    body:   &[Stmt],
+    decorators: &[Decorator],
+    name:       &str,
+    uses:       &[String],
+    params:     &[axon_parse::Param],
+    ret:        &SovereignTy,
+    body:       &[Stmt],
 ) -> HirResult<HirFn> {
     let hir_params = params.iter()
         .map(|p| Ok(HirParam {
             name: p.name.clone(),
-            ty:   lower_ty(&p.ty),
+            ty:   lower_sovereign_ty(&p.ty),
         }))
         .collect::<HirResult<Vec<_>>>()?;
 
@@ -62,37 +81,110 @@ fn lower_fn(
         .collect::<HirResult<Vec<_>>>()?;
 
     Ok(HirFn {
-        id:     next_id(),
-        name:   name.clone(),
-        params: hir_params,
-        ret:    lower_ty(ret),
-        body:   hir_body,
+        id:         next_id(),
+        decorators: decorators.iter().map(lower_decorator).collect(),
+        name:       name.to_string(),
+        uses:       uses.to_vec(),
+        params:     hir_params,
+        ret:        lower_sovereign_ty(ret),
+        body:       hir_body,
     })
 }
 
 fn lower_struct(
-    name:   &AxString,
+    name:   &str,
     fields: &[axon_parse::Field],
 ) -> HirResult<HirStruct> {
     let hir_fields = fields.iter()
         .map(|f| Ok(HirField {
             name: f.name.clone(),
-            ty:   lower_ty(&f.ty),
+            ty:   lower_sovereign_ty(&f.ty),
         }))
         .collect::<HirResult<Vec<_>>>()?;
 
     Ok(HirStruct {
         id:     next_id(),
-        name:   name.clone(),
+        name:   name.to_string(),
         fields: hir_fields,
     })
 }
 
-fn lower_ty(ty: &TypeExpr) -> HirTy {
-    if ty.name.is_empty() {
-        HirTy::Infer
+// Lower SovereignTy to HirTy — preserves all wrappers.
+fn lower_sovereign_ty(ty: &SovereignTy) -> HirTy {
+    match ty {
+        SovereignTy::Plain(t)              => lower_ty(t),
+        SovereignTy::Tainted(inner)        => HirTy::Tainted(Box::new(lower_ty(inner))),
+        SovereignTy::Clean(inner)          => HirTy::Clean(Box::new(lower_ty(inner))),
+        SovereignTy::Secret(inner)         => HirTy::Secret(Box::new(lower_ty(inner))),
+        SovereignTy::Auditable(inner)      => HirTy::Auditable(Box::new(lower_ty(inner))),
+        SovereignTy::Expires { inner, after } => HirTy::Expires {
+            inner:    Box::new(lower_ty(inner)),
+            after_ms: parse_duration_ms(after),
+        },
+        SovereignTy::Resident { inner, jurisdiction } => HirTy::Resident {
+            inner:        Box::new(lower_ty(inner)),
+            jurisdiction: jurisdiction.clone(),
+        },
+        SovereignTy::Money { currency, precision } => HirTy::Money {
+            currency:  currency.clone(),
+            precision: *precision,
+        },
+        SovereignTy::SafeInt { lo, hi }    => HirTy::SafeInt { lo: *lo, hi: *hi },
+        SovereignTy::Refinement { base, pred } => HirTy::Refinement {
+            base: Box::new(lower_ty(base)),
+            pred: pred.clone(),
+        },
+        SovereignTy::Opaque { name, inner } => HirTy::Opaque {
+            name:  name.clone(),
+            inner: Box::new(lower_ty(inner)),
+        },
+    }
+}
+
+// Parse simple duration strings to milliseconds.
+// P55.5: basic cases only — full parser in P55.6.
+fn parse_duration_ms(s: &str) -> i64 {
+    if s.ends_with("min") {
+        s.trim_end_matches("min").trim().parse::<i64>().unwrap_or(0) * 60_000
+    } else if s.ends_with("ms") {
+        s.trim_end_matches("ms").trim().parse::<i64>().unwrap_or(0)
+    } else if s.ends_with('s') {
+        s.trim_end_matches('s').trim().parse::<i64>().unwrap_or(0) * 1_000
+    } else if s.ends_with('h') {
+        s.trim_end_matches('h').trim().parse::<i64>().unwrap_or(0) * 3_600_000
     } else {
-        HirTy::Named(ty.name.clone())
+        0
+    }
+}
+
+// Lower a plain TypeExpr to HirTy — unchanged from P51.
+fn lower_ty(ty: &TypeExpr) -> HirTy {
+    if ty.name.is_empty() { HirTy::Infer }
+    else { HirTy::Named(ty.name.clone()) }
+}
+
+// Lower AST Decorator to HirDecorator.
+fn lower_decorator(d: &Decorator) -> HirDecorator {
+    match d {
+        Decorator::Deterministic              => HirDecorator::Deterministic,
+        Decorator::ConstantTime               => HirDecorator::ConstantTime,
+        Decorator::AiSpecialize(s)            => HirDecorator::AiSpecialize(s.clone()),
+        Decorator::AiIntent(s)                => HirDecorator::AiIntent(s.clone()),
+        Decorator::AiVerify { pre, post, invariant } => HirDecorator::AiVerify {
+            pre: pre.clone(), post: post.clone(), invariant: invariant.clone(),
+        },
+        Decorator::Ensures(s)                 => HirDecorator::Ensures(s.clone()),
+        Decorator::RequiresConsent { user_id, purpose } => HirDecorator::RequiresConsent {
+            user_id: user_id.clone(), purpose: purpose.clone(),
+        },
+        Decorator::SealedMemory               => HirDecorator::SealedMemory,
+        Decorator::Balanced                   => HirDecorator::Balanced,
+        Decorator::AtomicFinancial            => HirDecorator::AtomicFinancial,
+        Decorator::ModelSigned(s)             => HirDecorator::ModelSigned(s.clone()),
+        Decorator::InferenceBudget { tokens, time_ms } => HirDecorator::InferenceBudget {
+            tokens: *tokens, time_ms: *time_ms,
+        },
+        Decorator::RequiresHumanApproval(s)   => HirDecorator::RequiresHumanApproval(s.clone()),
     }
 }
 
@@ -102,16 +194,20 @@ fn lower_stmt(stmt: &Stmt) -> HirResult<HirStmt> {
             Ok(HirStmt::Let {
                 name:    name.clone(),
                 mutable: *mutable,
-                ty:      HirTy::Infer, // P52 fills this
+                ty:      HirTy::Infer,
                 value:   lower_expr(value)?,
             })
         }
-        Stmt::Return(expr) => {
-            Ok(HirStmt::Return(lower_expr(expr)?))
+        // P55.5: ephemeral binding — zeroized on drop at P55.6 runtime
+        Stmt::LetAt { name, value } => {
+            Ok(HirStmt::LetAt {
+                name:  name.clone(),
+                ty:    HirTy::Infer,
+                value: lower_expr(value)?,
+            })
         }
-        Stmt::ExprStmt(expr) => {
-            Ok(HirStmt::ExprStmt(lower_expr(expr)?))
-        }
+        Stmt::Return(expr)    => Ok(HirStmt::Return(lower_expr(expr)?)),
+        Stmt::ExprStmt(expr)  => Ok(HirStmt::ExprStmt(lower_expr(expr)?)),
     }
 }
 
@@ -143,44 +239,76 @@ fn lower_expr(expr: &Expr) -> HirResult<HirExpr> {
             Ok(HirExpr::Call { name: name.clone(), args: hir_args })
         }
         Expr::Block(stmts) => {
-            // Blocks are inlined — last expr promoted to enclosing context
-            // At P51 blocks with single return are the common case
-            if stmts.is_empty() {
-                return Ok(HirExpr::Nil);
-            }
-            // Return the HIR of the last stmt's expression if it's an ExprStmt
+            if stmts.is_empty() { return Ok(HirExpr::Nil); }
             if let Some(Stmt::Return(e)) = stmts.last() {
                 return lower_expr(e);
             }
-            // Otherwise wrap as an If-like structure via Nil sentinel
             Ok(HirExpr::Nil)
         }
         Expr::If { cond, then, else_ } => {
-            let hir_cond = lower_expr(cond)?;
-            let hir_then = lower_block_expr(then)?;
-            let hir_else = match else_ {
-                Some(e) => Some(lower_block_expr(e)?),
-                None    => None,
-            };
             Ok(HirExpr::If {
-                cond:  Box::new(hir_cond),
-                then:  hir_then,
-                else_: hir_else,
+                cond:  Box::new(lower_expr(cond)?),
+                then:  lower_block_expr(then)?,
+                else_: match else_ {
+                    Some(e) => Some(lower_block_expr(e)?),
+                    None    => None,
+                },
+            })
+        }
+        // P55.5: v0.3 expression nodes
+        Expr::Pipe { lhs, rhs, contract } => {
+            Ok(HirExpr::Pipe {
+                lhs:      Box::new(lower_expr(lhs)?),
+                rhs:      Box::new(lower_expr(rhs)?),
+                contract: contract.clone(),
+            })
+        }
+        Expr::Morph { expr, method } => {
+            Ok(HirExpr::Morph {
+                expr:   Box::new(lower_expr(expr)?),
+                method: method.clone(),
+            })
+        }
+        Expr::CapPinCall { expr, method, pin } => {
+            Ok(HirExpr::CapPinCall {
+                expr:   Box::new(lower_expr(expr)?),
+                method: method.clone(),
+                pin:    match pin {
+                    CapPin::Required => HirCapPin::Required,
+                    CapPin::Optional => HirCapPin::Optional,
+                },
+            })
+        }
+        Expr::Temporal(kind) => {
+            Ok(HirExpr::Temporal(match kind {
+                TemporalKind::Now      => HirTemporalKind::Now,
+                TemporalKind::Lifetime => HirTemporalKind::Lifetime,
+                TemporalKind::Epoch    => HirTemporalKind::Epoch,
+            }))
+        }
+        Expr::Foreach { var, gen, body } => {
+            Ok(HirExpr::Foreach {
+                var:  var.clone(),
+                gen:  Box::new(lower_expr(gen)?),
+                body: body.iter().map(lower_stmt).collect::<HirResult<Vec<_>>>()?,
+            })
+        }
+        Expr::Yield(expr) => {
+            Ok(HirExpr::Yield(Box::new(lower_expr(expr)?)))
+        }
+        Expr::IntentBlock { modes, body } => {
+            Ok(HirExpr::IntentBlock {
+                modes: modes.clone(),
+                body:  body.iter().map(lower_stmt).collect::<HirResult<Vec<_>>>()?,
             })
         }
     }
 }
 
-/// Lower a block expression (Expr::Block) to a Vec<HirStmt>.
 fn lower_block_expr(expr: &Expr) -> HirResult<Vec<HirStmt>> {
     match expr {
-        Expr::Block(stmts) => {
-            stmts.iter().map(lower_stmt).collect()
-        }
-        other => {
-            // Non-block expression in block position — wrap as ExprStmt
-            Ok(vec![HirStmt::ExprStmt(lower_expr(other)?)])
-        }
+        Expr::Block(stmts) => stmts.iter().map(lower_stmt).collect(),
+        other => Ok(vec![HirStmt::ExprStmt(lower_expr(other)?)]),
     }
 }
 

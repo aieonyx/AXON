@@ -144,6 +144,14 @@ fn emit_stmt(ctx: &mut NativeCtx, stmt: &HirStmt) -> NativeResult<()> {
             emit_expr(ctx, expr)?;
             Ok(())
         }
+        // P55.5: ephemeral — same as Let for native codegen; zeroize on drop at P55.6
+        HirStmt::LetAt { name, value, .. } => {
+            emit_expr(ctx, value)?;
+            let slot = ctx.local_slots.len();
+            ctx.emit(&push_rax());
+            ctx.local_slots.push((name.clone(), slot));
+            Ok(())
+        }
     }
 }
 
@@ -181,11 +189,25 @@ fn emit_expr(ctx: &mut NativeCtx, expr: &HirExpr) -> NativeResult<()> {
         }
         HirExpr::Call { name, args } => emit_call(ctx, name, args),
         HirExpr::If { cond, then, else_ } => emit_if(ctx, cond, then, else_),
+        // P55.5: v0.3 nodes — full native emission in P55.6/P57
+        HirExpr::Pipe { lhs, .. }        => emit_expr(ctx, lhs),
+        HirExpr::Morph { expr, .. }      => emit_expr(ctx, expr),
+        HirExpr::CapPinCall { expr, .. } => emit_expr(ctx, expr),
+        HirExpr::Temporal(_)             => { ctx.emit(&mov_rax_imm32(0)); Ok(()) }
+        HirExpr::Foreach { body, .. }    => {
+            for stmt in body { emit_stmt(ctx, stmt)?; }
+            Ok(())
+        }
+        HirExpr::Yield(expr)             => emit_expr(ctx, expr),
+        HirExpr::IntentBlock { body, .. } => {
+            for stmt in body { emit_stmt(ctx, stmt)?; }
+            Ok(())
+        }
     }
 }
 
-fn emit_var(ctx: &mut NativeCtx, name: &AxString) -> NativeResult<()> {
-    let n = name.as_str();
+fn emit_var(ctx: &mut NativeCtx, name: &str) -> NativeResult<()> {
+    let n = name;
 
     // Check param registers first (direct register access)
     for (pname, reg_id) in &ctx.param_regs {
@@ -203,7 +225,7 @@ fn emit_var(ctx: &mut NativeCtx, name: &AxString) -> NativeResult<()> {
         }
     }
 
-    Err(NativeError::UndefinedName(name.clone()))
+    Err(NativeError::UndefinedName(AxString::ax_from_str(name)))
 }
 
 fn emit_binop(
@@ -243,7 +265,7 @@ fn emit_binop(
     Ok(())
 }
 
-fn emit_call(ctx: &mut NativeCtx, name: &AxString, args: &[HirExpr]) -> NativeResult<()> {
+fn emit_call(ctx: &mut NativeCtx, name: &str, args: &[HirExpr]) -> NativeResult<()> {
     // Push args in reverse order, then pop into param registers in forward order.
     // This correctly handles register reuse (e.g., g(b, a) where a=rdi, b=rsi).
     for arg in args.iter().rev() {
@@ -259,7 +281,7 @@ fn emit_call(ctx: &mut NativeCtx, name: &AxString, args: &[HirExpr]) -> NativeRe
     ctx.emit(&[0xe8]);
     let rel_pos = ctx.pos();
     ctx.emit(&[0x00, 0x00, 0x00, 0x00]);
-    ctx.relocs.push((rel_pos, name.as_str().to_string()));
+    ctx.relocs.push((rel_pos, name.to_string()));
     Ok(())
 }
 

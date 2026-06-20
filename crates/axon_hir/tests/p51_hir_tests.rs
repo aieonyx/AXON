@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // P51 QA -- axon_hir test suite
 // Pass bar: 10/10 before P52 begins.
+// P55.5: AxString -> String throughout.
 
 use axon_hir::{
     lower_source, HirBinOp, HirExpr, HirParam,
     HirStmt, HirTy,
 };
-use axon_std_string::AxString;
 
-fn ax(s: &str) -> AxString { AxString::ax_from_str(s) }
-fn named(s: &str) -> HirTy { HirTy::Named(ax(s)) }
+fn named(s: &str) -> HirTy { HirTy::Named(s.to_string()) }
 
 // T1: empty program
 #[test]
@@ -47,7 +46,7 @@ fn test_lower_binop() {
     panic!("expected BinOp Add");
 }
 
-// T5: let stmt with no annotation → HirTy::Infer
+// T5: let stmt with no annotation -> HirTy::Infer
 #[test]
 fn test_lower_let() {
     let hir = lower_source("fn f() -> i32 { let x = 42; return 0; }").unwrap();
@@ -61,13 +60,11 @@ fn test_lower_let() {
     panic!("expected Let with Infer type");
 }
 
-// T6: let stmt with type annotation → HirTy::Named
+// T6: let stmt with type annotation -> HirTy resolves
 #[test]
 fn test_lower_let_typed() {
     let hir = lower_source("fn f() -> i32 { let x: i32 = 42; return 0; }").unwrap();
     if let HirStmt::Let { ty, .. } = &hir.fns[0].body[0] {
-        // Type annotation skipped by parser at P50 — Infer is correct at P51
-        // P52 will resolve this via inference
         assert!(matches!(ty, HirTy::Infer | HirTy::Named(_)));
         return;
     }
@@ -82,8 +79,8 @@ fn test_lower_fn() {
     let f = &hir.fns[0];
     assert_eq!(f.name.as_str(), "add");
     assert_eq!(f.params.len(), 2);
-    assert_eq!(f.params[0], HirParam { name: ax("a"), ty: named("i32") });
-    assert_eq!(f.params[1], HirParam { name: ax("b"), ty: named("i32") });
+    assert_eq!(f.params[0], HirParam { name: "a".to_string(), ty: named("i32") });
+    assert_eq!(f.params[1], HirParam { name: "b".to_string(), ty: named("i32") });
     assert_eq!(f.ret, named("i32"));
     assert_eq!(f.body.len(), 1);
 }
@@ -108,7 +105,7 @@ fn test_lower_if() {
     let src = "fn f() -> i32 { if x { return 1; } }";
     let hir = lower_source(src).unwrap();
     if let HirStmt::ExprStmt(HirExpr::If { cond, then, else_ }) = &hir.fns[0].body[0] {
-        assert_eq!(**cond, HirExpr::Var(ax("x")));
+        assert_eq!(**cond, HirExpr::Var("x".to_string()));
         assert!(!then.is_empty());
         assert!(else_.is_none());
         return;
@@ -126,11 +123,9 @@ fn test_lower_full_program() {
     assert_eq!(hir.fns[1].name.as_str(), "main");
     assert_eq!(hir.fns[0].params.len(), 1);
     assert_eq!(hir.fns[1].params.len(), 0);
-    // square body: return n * n
     if let HirStmt::Return(HirExpr::BinOp { op, .. }) = &hir.fns[0].body[0] {
         assert_eq!(*op, HirBinOp::Mul);
     } else { panic!("expected Mul in square"); }
-    // main body: return square(5)
     if let HirStmt::Return(HirExpr::Call { name, args }) = &hir.fns[1].body[0] {
         assert_eq!(name.as_str(), "square");
         assert_eq!(args[0], HirExpr::IntLit(5));

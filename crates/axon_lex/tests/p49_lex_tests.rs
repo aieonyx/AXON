@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // P49 QA -- axon_lex test suite
 // Pass bar: 14/14 before P50 begins.
+// P55.5: AxString -> String; method calls -> free functions.
 
 use axon_lex::{lex_all, Token};
-use axon_std_string::AxString;
+use axon_lex::token::{token_is_trivia, token_is_sovereign};
 
 // T1: empty input yields only Eof
 #[test]
@@ -17,7 +18,7 @@ fn test_lex_empty() {
 // T2: whitespace tokens
 #[test]
 fn test_lex_whitespace() {
-    let tokens = lex_all("  \t  ").unwrap();
+    let tokens = lex_all("  	  ").unwrap();
     let non_eof: Vec<&Token> = tokens.iter().filter(|t| **t != Token::Eof).collect();
     assert!(!non_eof.is_empty());
     assert!(non_eof.iter().all(|t| **t == Token::Whitespace));
@@ -55,7 +56,7 @@ fn test_lex_float_literal() {
 #[test]
 fn test_lex_string_literal() {
     let tokens = lex_all("\"hello\"").unwrap();
-    assert_eq!(tokens[0], Token::StringLit(AxString::ax_from_str("hello")));
+    assert_eq!(tokens[0], Token::StringLit("hello".to_string()));
     assert_eq!(tokens[1], Token::Eof);
 }
 
@@ -74,7 +75,7 @@ fn test_lex_bool_literal() {
 fn test_lex_keywords() {
     let tokens = lex_all("fn let mut if").unwrap();
     let sig: Vec<&Token> = tokens.iter()
-        .filter(|t| !t.is_trivia() && **t != Token::Eof).collect();
+        .filter(|t| !token_is_trivia(t) && **t != Token::Eof).collect();
     assert_eq!(*sig[0], Token::Fn);
     assert_eq!(*sig[1], Token::Let);
     assert_eq!(*sig[2], Token::Mut);
@@ -86,12 +87,12 @@ fn test_lex_keywords() {
 fn test_lex_sovereign_keywords() {
     let tokens = lex_all("sovereign capability seal domain").unwrap();
     let sig: Vec<&Token> = tokens.iter()
-        .filter(|t| !t.is_trivia() && **t != Token::Eof).collect();
+        .filter(|t| !token_is_trivia(t) && **t != Token::Eof).collect();
     assert_eq!(*sig[0], Token::Sovereign);
     assert_eq!(*sig[1], Token::Capability);
     assert_eq!(*sig[2], Token::Seal);
     assert_eq!(*sig[3], Token::Domain);
-    assert!(sig.iter().all(|t| t.is_sovereign_keyword()));
+    assert!(sig.iter().all(|t| token_is_sovereign(t)));
 }
 
 // T10: operators
@@ -99,7 +100,7 @@ fn test_lex_sovereign_keywords() {
 fn test_lex_operators() {
     let tokens = lex_all("+ - * / == != < > ->").unwrap();
     let sig: Vec<&Token> = tokens.iter()
-        .filter(|t| !t.is_trivia() && **t != Token::Eof).collect();
+        .filter(|t| !token_is_trivia(t) && **t != Token::Eof).collect();
     assert_eq!(*sig[0], Token::Plus);
     assert_eq!(*sig[1], Token::Minus);
     assert_eq!(*sig[2], Token::Star);
@@ -116,7 +117,7 @@ fn test_lex_operators() {
 fn test_lex_delimiters() {
     let tokens = lex_all("( ) { } [ ]").unwrap();
     let sig: Vec<&Token> = tokens.iter()
-        .filter(|t| !t.is_trivia() && **t != Token::Eof).collect();
+        .filter(|t| !token_is_trivia(t) && **t != Token::Eof).collect();
     assert_eq!(*sig[0], Token::LParen);
     assert_eq!(*sig[1], Token::RParen);
     assert_eq!(*sig[2], Token::LBrace);
@@ -129,7 +130,7 @@ fn test_lex_delimiters() {
 #[test]
 fn test_lex_identifier() {
     let tokens = lex_all("my_var").unwrap();
-    assert_eq!(tokens[0], Token::Ident(AxString::ax_from_str("my_var")));
+    assert_eq!(tokens[0], Token::Ident("my_var".to_string()));
     assert_eq!(tokens[1], Token::Eof);
 }
 
@@ -148,30 +149,30 @@ fn test_lex_line_comment() {
 // T14: full AXONYX program token stream
 #[test]
 fn test_lex_full_program() {
-    let src = "fn add(a: i32, b: i32) -> i32 {\n    return a + b;\n}";
+    let src = "fn add(a: i32, b: i32) -> i32 { return a + b; }";
     let tokens = lex_all(src).unwrap();
     let sig: Vec<&Token> = tokens.iter()
-        .filter(|t| !t.is_trivia())
+        .filter(|t| !token_is_trivia(t))
         .collect();
 
     assert_eq!(*sig[0],  Token::Fn);
-    assert_eq!(*sig[1],  Token::Ident(AxString::ax_from_str("add")));
+    assert_eq!(*sig[1],  Token::Ident("add".to_string()));
     assert_eq!(*sig[2],  Token::LParen);
-    assert_eq!(*sig[3],  Token::Ident(AxString::ax_from_str("a")));
+    assert_eq!(*sig[3],  Token::Ident("a".to_string()));
     assert_eq!(*sig[4],  Token::Colon);
-    assert_eq!(*sig[5],  Token::Ident(AxString::ax_from_str("i32")));
+    assert_eq!(*sig[5],  Token::Ident("i32".to_string()));
     assert_eq!(*sig[6],  Token::Comma);
-    assert_eq!(*sig[7],  Token::Ident(AxString::ax_from_str("b")));
+    assert_eq!(*sig[7],  Token::Ident("b".to_string()));
     assert_eq!(*sig[8],  Token::Colon);
-    assert_eq!(*sig[9],  Token::Ident(AxString::ax_from_str("i32")));
+    assert_eq!(*sig[9],  Token::Ident("i32".to_string()));
     assert_eq!(*sig[10], Token::RParen);
     assert_eq!(*sig[11], Token::Arrow);
-    assert_eq!(*sig[12], Token::Ident(AxString::ax_from_str("i32")));
+    assert_eq!(*sig[12], Token::Ident("i32".to_string()));
     assert_eq!(*sig[13], Token::LBrace);
     assert_eq!(*sig[14], Token::Return);
-    assert_eq!(*sig[15], Token::Ident(AxString::ax_from_str("a")));
+    assert_eq!(*sig[15], Token::Ident("a".to_string()));
     assert_eq!(*sig[16], Token::Plus);
-    assert_eq!(*sig[17], Token::Ident(AxString::ax_from_str("b")));
+    assert_eq!(*sig[17], Token::Ident("b".to_string()));
     assert_eq!(*sig[18], Token::Semi);
     assert_eq!(*sig[19], Token::RBrace);
     assert_eq!(*sig[20], Token::Eof);

@@ -114,7 +114,7 @@ pub fn lex_next(cursor: &mut Cursor) -> LexResult<Token> {
             if cursor.peek() == ':' { cursor.advance(); Ok(Token::ColonColon) }
             else { Ok(Token::Colon) }
         }
-        other => Ok(Token::Unknown(AxChar::from_char(other))),
+        other => Ok(Token::Unknown(other)),
     }
 }
 
@@ -127,7 +127,7 @@ fn lex_slash(cursor: &mut Cursor) -> LexResult<Token> {
         while cursor.peek() != '\n' && cursor.peek() != '\0' {
             comment.push(cursor.advance());
         }
-        Ok(Token::Comment(AxString::ax_from_str(comment.trim())))
+        Ok(Token::Comment(comment.trim().to_string()))
     } else if cursor.peek() == '*' {
         cursor.advance();
         let mut comment = String::new();
@@ -136,7 +136,7 @@ fn lex_slash(cursor: &mut Cursor) -> LexResult<Token> {
             if c == '\0' { return Err(LexError::UnterminatedComment); }
             if c == '*' && cursor.peek() == '/' {
                 cursor.advance();
-                return Ok(Token::Comment(AxString::ax_from_str(comment.trim())));
+                return Ok(Token::Comment(comment.trim().to_string()));
             }
             comment.push(c);
         }
@@ -150,7 +150,7 @@ fn lex_string(cursor: &mut Cursor) -> LexResult<Token> {
     loop {
         let c = cursor.advance();
         if c == '\0' { return Err(LexError::UnterminatedString); }
-        if c == '"' { return Ok(Token::StringLit(AxString::ax_from_str(&s))); }
+        if c == '"' { return Ok(Token::StringLit(s.clone())); }
         if c == '\\' {
             let e = cursor.advance();
             match e {
@@ -223,6 +223,6 @@ fn lex_ident(cursor: &mut Cursor, first: char) -> LexResult<Token> {
         "capability" => Token::Capability,
         "seal"       => Token::Seal,
         "domain"     => Token::Domain,
-        _            => Token::Ident(AxString::ax_from_str(&ident)),
+        _            => Token::Ident(ident.clone()),
     })
 }

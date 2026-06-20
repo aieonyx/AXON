@@ -13,8 +13,8 @@ pub mod bridge;
 pub mod error;
 
 pub use ast::{
-    BinOpKind, Expr, Field, Item, Param, Program,
-    Stmt, TypeExpr, UnaryOpKind,
+    BinOpKind, CapPin, Decorator, Expr, Field, Item, Param, Program,
+    Stmt, SovereignTy, TemporalKind, TypeExpr, UnaryOpKind,
 };
 pub use bridge::parse;
 pub use error::{ParseError, ParseResult};
