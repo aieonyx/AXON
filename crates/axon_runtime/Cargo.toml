@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "axon_runtime"
+version = "0.55.6"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_runtime — sovereign type runtime: Money<T>, Secret<T>, SafeInt<T>"
+license = "Apache-2.0"
+
+[dependencies]
+axon_std_string = { path = "../axon_std/string" }
+
+[dev-dependencies]
