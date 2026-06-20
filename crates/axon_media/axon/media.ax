@@ -1,0 +1,15 @@
+// media.ax -- AXONYX sovereign media specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P59: PCM audio, RTP framing, video frame buffer.
+struct PcmConfig { sample_rate: i64, channels: i64, bit_depth: i64 }
+struct PcmFrame  { config: PcmConfig, samples: [i64] }
+struct RtpHeader { version: i64, sequence: i64, timestamp: i64, ssrc: i64 }
+struct RtpPacket { header: RtpHeader, payload: [u8] }
+struct VideoFrame { width: i64, height: i64, format: str, data: [u8] }
+fn pcm_telephony() -> PcmConfig { sovereign }
+fn pcm_to_bytes(f: &PcmFrame) -> [u8] { sovereign }
+fn pcm_from_bytes(cfg: PcmConfig, b: [u8]) -> PcmFrame { sovereign }
+fn rtp_packet_to_bytes(p: &RtpPacket) -> [u8] { sovereign }
+fn rtp_packet_from_bytes(b: [u8]) -> RtpPacket { sovereign }
+fn video_frame_new(w: i64, h: i64, fmt: str) -> VideoFrame { sovereign }
