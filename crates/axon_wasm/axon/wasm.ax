@@ -1,0 +1,9 @@
+// wasm.ax -- AXONYX sovereign WASM runtime specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P61: ECHO WASM parser, validator, interpreter.
+struct WasmModule { types: [str], func_types: [i64], exports: [str] }
+struct WasmValue  { kind: str, i32: i64, i64: i64, f32: f64, f64: f64 }
+fn wasm_parse(bytes: [u8]) -> WasmModule { sovereign }
+fn wasm_validate(module: &WasmModule) -> bool { sovereign }
+fn wasm_call(module: &WasmModule, name: str, args: [WasmValue]) -> [WasmValue] { sovereign }

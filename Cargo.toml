@@ -35,6 +35,7 @@ members = [
     "crates/axon_gpu",
     "crates/axon_media",
     "crates/axon_layout",
+    "crates/axon_wasm",
     "axon_cli",
     "axon_sel4",
     "axon_math",

@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "axon_wasm"
+version = "0.61.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_wasm — ECHO sovereign WebAssembly runtime: parser, validator, interpreter"
+license = "Apache-2.0"
+[dependencies]
+[dev-dependencies]
