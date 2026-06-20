@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "axon_font"
+version = "0.62.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_font — sovereign font rendering: glyph metrics, bitmap rasterization, Unicode"
+license = "Apache-2.0"
+[dependencies]
+[dev-dependencies]

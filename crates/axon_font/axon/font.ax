@@ -1,0 +1,13 @@
+// font.ax -- AXONYX sovereign font specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P62: sovereign font rendering -- 8x8 bitmap glyphs, RGBA rasterization.
+struct GlyphMetrics { width: i64, height: i64, advance_x: i64 }
+struct Glyph { codepoint: i64, metrics: GlyphMetrics, bitmap: [u8] }
+struct Font  { name: str }
+struct RasterConfig { fg: [u8], bg: [u8], scale: i64 }
+fn font_builtin() -> Font { sovereign }
+fn font_glyph(f: &Font, codepoint: i64) -> Glyph { sovereign }
+fn font_has_glyph(f: &Font, codepoint: i64) -> bool { sovereign }
+fn raster_line(text: str, cfg: &RasterConfig) -> [u8] { sovereign }
+fn raster_measure_width(text: str, scale: i64) -> i64 { sovereign }
