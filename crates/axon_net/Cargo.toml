@@ -1,0 +1,9 @@
+[package]
+name = "axon_net"
+version = "0.56.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_net - HERALD sovereign TCP networking substrate"
+license = "Apache-2.0"
+[dependencies]
+axon_std_string = { path = "../axon_std/string" }

@@ -1,0 +1,13 @@
+// net.ax -- AXONYX sovereign network specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P56: raw TCP substrate. P57: TLS + mutual auth.
+struct AxonAddr { socket: str, fingerprint: Option<[u8]> }
+struct AxonConn { local: AxonAddr, remote: AxonAddr }
+struct AxonListener { local: AxonAddr }
+fn addr_from_str(s: str) -> AxonAddr {
+    AxonAddr { socket: s, fingerprint: nil }
+}
+fn addr_is_sovereign(addr: &AxonAddr) -> bool {
+    match addr.fingerprint { nil => false, _ => true }
+}

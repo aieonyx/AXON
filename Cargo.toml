@@ -30,6 +30,7 @@ members = [
     "crates/axon_native",
     "crates/axonc",
     "crates/axon_runtime",
+    "crates/axon_net",
     "axon_cli",
     "axon_sel4",
     "axon_math",
