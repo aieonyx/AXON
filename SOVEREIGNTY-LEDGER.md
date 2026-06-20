@@ -46,3 +46,8 @@ No code was copied. All implementations are original.
 3. `@sealed_memory` runtime — mlock() on Linux, seL4 PD capability gate on BASTION
 
 **Search tag:** DEFER-P55.7
+
+| 2026-06-20 | RFC 7539 — ChaCha20 stream cipher specification | Understand quarter-round and block function before writing chacha20.rs | `chacha20.rs` sovereign implementation from scratch | Yes — spec only, no code copied |
+| 2026-06-20 | RFC 8032 — Ed25519 Edwards-curve Digital Signature Algorithm | Understand seed-to-keypair and sign/verify structure before writing ed25519.rs | `ed25519.rs` P57.0 structural implementation; full curve at P57.1 | Yes — spec only, no code copied |
+| 2026-06-20 | RFC 7748 — X25519 Elliptic Curve Diffie-Hellman | Understand key clamping and DH structure before writing x25519.rs | `x25519.rs` P57.0 approximation; Montgomery ladder at P57.1 | Yes — spec only, no code copied |
+| 2026-06-20 | FIPS PUB 180-4 — SHA-256 specification | Understand compression function and padding before writing sha256 in identity.rs | `identity.rs` sovereign SHA-256 from scratch | Yes — spec only, no code copied |

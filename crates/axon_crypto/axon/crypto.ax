@@ -1,0 +1,19 @@
+// crypto.ax -- AXONYX sovereign cryptography specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P57: Ed25519 identity, X25519 DH, ChaCha20 encryption, SHA-256.
+struct Ed25519PublicKey { bytes: [u8] }
+struct Ed25519KeyPair { seed: [u8], public_key: Ed25519PublicKey }
+struct X25519PublicKey { bytes: [u8] }
+struct X25519SecretKey { bytes: [u8] }
+struct SovereignIdentity {
+    keypair:     Ed25519KeyPair,
+    fingerprint: [u8],
+}
+fn identity_generate() -> SovereignIdentity { sovereign }
+fn identity_sign(id: &SovereignIdentity, msg: [u8]) -> [u8] { sovereign }
+fn identity_verify(id: &SovereignIdentity, msg: [u8], sig: [u8]) -> bool { sovereign }
+fn sha256(data: [u8]) -> [u8] { sovereign }
+fn chacha20_encrypt(key: [u8], nonce: [u8], data: [u8]) -> [u8] { sovereign }
+fn chacha20_decrypt(key: [u8], nonce: [u8], data: [u8]) -> [u8] { sovereign }
+fn derive_session_key(shared: [u8]) -> [u8] { sovereign }
