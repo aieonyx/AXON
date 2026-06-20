@@ -170,7 +170,7 @@ impl Fe25519 {
     /// Canonical reduction: reduce to [0, p-1].
     /// Two-pass: first propagate carries, then subtract p if value >= p.
     pub fn reduce_canonical(self) -> Self {
-        let mut h = self.carry_reduce();
+        let h = self.carry_reduce();
 
         // Now each limb < 2^51. Check if h >= p = 2^255 - 19.
         // p in limbs: [2^51-19, 2^51-1, 2^51-1, 2^51-1, 2^51-1]
