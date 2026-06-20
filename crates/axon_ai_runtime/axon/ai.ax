@@ -1,0 +1,17 @@
+// ai.ax -- AXONYX sovereign AI runtime specification
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// P63: HANIEL-ONYX sovereign AI inference -- tensor, graph, model.
+// This is the +i in S4+i. The crown of the AXONYX stack.
+struct Tensor { shape: [i64], data: [f64] }
+struct DenseLayer { name: str, weights: Tensor, activation: str }
+struct SovereignModel { name: str, layers: [DenseLayer] }
+struct GraphNode { id: str, op: str, inputs: [str] }
+struct ComputeGraph { nodes: [GraphNode] }
+fn tensor_zeros(shape: [i64]) -> Tensor { sovereign }
+fn tensor_matmul(a: &Tensor, b: &Tensor) -> Tensor { sovereign }
+fn tensor_relu(t: &Tensor) -> Tensor { sovereign }
+fn tensor_softmax(t: &Tensor) -> Tensor { sovereign }
+fn model_infer(m: &SovereignModel, input: &Tensor) -> Tensor { sovereign }
+fn model_predict_class(m: &SovereignModel, input: &Tensor) -> i64 { sovereign }
+fn graph_forward(g: &ComputeGraph, inputs: [Tensor]) -> [Tensor] { sovereign }
