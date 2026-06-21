@@ -56,3 +56,45 @@ No code was copied. All implementations are original.
 | 2026-06-20 | WebAssembly Core Specification 2.0 — binary format and execution semantics | Understand WASM section format, LEB128 encoding, and stack machine semantics before writing module.rs and runtime.rs | `module.rs`, `runtime.rs`, `validator.rs` sovereign implementations from scratch | Yes — spec only, no code copied |
 | 2026-06-20 | Adobe BDF (Bitmap Distribution Format) specification | Understand glyph bitmap encoding before writing glyph.rs and builtin.rs | `glyph.rs`, `builtin.rs` sovereign implementations — pixel patterns original artwork | Yes — spec only, pixel patterns original |
 | 2026-06-20 | Deep learning mathematics — backpropagation, softmax, layer normalization (academic papers: Attention Is All You Need, LayerNorm paper, original backprop paper) | Understand forward pass mathematics before writing ops.rs and model.rs | `ops.rs`, `model.rs`, `graph.rs` sovereign implementations from scratch | Yes — math papers only, no code copied |
+
+## P58.1 — Vulkan GPU Backend (June 2026)
+
+**Status:** COMPLETE  
+**Tag:** v0.58.1-m3  
+**Tests:** 30/30  
+
+### Deliverables
+
+| Component | Description |
+|---|---|
+| `vulkan/instance.rs` | VkInstance, compute-only, no display surface |
+| `vulkan/physical.rs` | Device enumeration, discrete GPU preference, VRAM reporting |
+| `vulkan/logical.rs` | VkDevice + compute VkQueue + VkCommandPool + one_shot() |
+| `vulkan/memory.rs` | Memory type selection with APU unified-memory fallback |
+| `vulkan/vkbuffer.rs` | VkBuffer + VkDeviceMemory, staging upload/download |
+| `vulkan/pipeline.rs` | VkComputePipeline per kernel, VkDescriptorSetLayout |
+| `vulkan/compute.rs` | SPIR-V dispatch for Add, Mul, Scale, ReLU, MatMul |
+| `shaders/*.glsl` | 5 GLSL compute shaders compiled to SPIR-V via naga |
+| `build.rs` | Pure-Rust GLSL→SPIR-V compilation, zero external tools |
+
+### Hardware verified
+
+- **Device:** AMD Radeon Graphics (RADV RENOIR)  
+- **VRAM:** 10,812 MB (unified APU memory)  
+- **Max threads:** 1,024 per workgroup  
+- **Backend:** Vulkan 1.3.280 via Mesa RADV  
+
+### Architecture decisions
+
+- `GpuDevice::discover()` probes Vulkan first, falls back to CPU — transparent to callers
+- `GpuKernel::dispatch()` routes to Vulkan path when `device.is_vulkan()` — same API as CPU fallback
+- Feature-gated: `[features] vulkan = ["ash"]` — headless builds exclude Vulkan entirely
+- SPIR-V compiled at Rust build time via naga — no external glslc/spirv-tools required
+- Vulkan context created per-dispatch in M3 (cached context deferred to post-Barcelona optimization)
+
+### Post-P58.1 open items
+
+- [ ] Context caching: persist VulkanInstance/LogicalDevice across dispatches (perf)
+- [ ] DotProduct kernel in SPIR-V (currently CPU path used)
+- [ ] f16 support via VK_KHR_shader_float16_int8
+- [ ] CANVAS/HANIEL integration (P56–P63 unlock track)
