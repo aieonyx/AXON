@@ -6,6 +6,8 @@
 // Excised at P55 bootstrap when axonc compiles emit.ax natively.
 
 use axon_hir::{HirBinOp, HirExpr, HirFn, HirProgram, HirStmt, HirUnaryOp};
+use axon_ct_check::check_program;
+use axon_hir::hir::HirDecorator;
 use axon_infer::{infer_program, InferredFn, InferredProgram, Ty};
 use axon_std_string::AxString;
 use crate::error::{CodegenError, CodegenResult};
@@ -22,6 +24,8 @@ struct EmitCtx {
     allocas:  Vec<(String, String, Ty)>,
     /// Function name → return Ty
     fn_rets:  Vec<(String, Ty)>,
+    /// Names of @constant_time functions — drives module footer emission
+    ct_fns:   Vec<String>,
 }
 
 impl EmitCtx {
@@ -32,6 +36,7 @@ impl EmitCtx {
             params:  Vec::new(),
             allocas: Vec::new(),
             fn_rets: Vec::new(),
+            ct_fns:  Vec::new(),
         }
     }
 
@@ -79,6 +84,19 @@ pub fn codegen_source(source: &str) -> CodegenResult<String> {
     let typed = infer_program(&hir).map_err(|e| {
         CodegenError::PipelineError(AxString::ax_from_str(&format!("infer: {}", e)))
     })?;
+    // P55.7: run @constant_time static analysis before codegen
+    if let Err(e) = check_program(&hir) {
+        let msg = match e {
+            axon_ct_check::CtError::Violations(vs) => {
+                let descs: Vec<String> = vs.iter().map(|v| v.description()).collect();
+                descs.join("; ")
+            }
+        };
+        return Err(CodegenError::PipelineError(
+            AxString::ax_from_str(&format!("ct_check: {}", msg))
+        ));
+    }
+
     emit_module(&hir, &typed)
 }
 
@@ -99,6 +117,20 @@ pub fn emit_module(hir: &HirProgram, typed: &InferredProgram) -> CodegenResult<S
     // Emit each function
     for (hir_fn, inf_fn) in hir.fns.iter().zip(typed.fns.iter()) {
         emit_fn(&mut ctx, hir_fn, inf_fn)?;
+    }
+
+    // P55.7: @constant_time module footer
+    if !ctx.ct_fns.is_empty() {
+        ctx.line("; --- P55.7 @constant_time enforcement ---");
+        ctx.line("attributes #0 = { noinline optnone \"no-speculation\" }");
+        ctx.line("!0 = !{!\"axon.constant_time\"}");
+        ctx.line("");
+        ctx.line("; @constant_time functions in this module:");
+        let ct_names: Vec<String> = ctx.ct_fns.clone();
+        for name in &ct_names {
+            ctx.line(&format!(";   @{}", name));
+        }
+        ctx.line("");
     }
 
     Ok(ctx.buf)
@@ -123,7 +155,14 @@ fn emit_fn(ctx: &mut EmitCtx, f: &HirFn, inf: &InferredFn) -> CodegenResult<()> 
         .join(", ");
 
     let ret_str = ty_str(&inf.ret_ty);
-    ctx.line(&format!("define {} @{}({}) {{", ret_str, f.name, params_str));
+    // P55.7: check for @constant_time decorator
+    let is_ct = f.decorators.iter().any(|d| matches!(d, HirDecorator::ConstantTime));
+    if is_ct {
+        ctx.ct_fns.push(f.name.clone());
+        ctx.line(&format!("define {} @{}({}) #0 {{", ret_str, f.name, params_str));
+    } else {
+        ctx.line(&format!("define {} @{}({}) {{", ret_str, f.name, params_str));
+    }
     ctx.line("entry:");
 
     for stmt in &f.body {

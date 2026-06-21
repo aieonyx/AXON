@@ -10,6 +10,7 @@ description = "axon_codegen — LLVM IR emission. AXON emits its own IR. P53."
 license = "Apache-2.0"
 
 [dependencies]
+axon_ct_check = { path = "../axon_ct_check" }
 axon_std_string = { path = "../axon_std/string" }
 axon_parse      = { path = "../axon_parse" }
 axon_hir        = { path = "../axon_hir" }
