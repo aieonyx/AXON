@@ -98,3 +98,46 @@ No code was copied. All implementations are original.
 - [ ] DotProduct kernel in SPIR-V (currently CPU path used)
 - [ ] f16 support via VK_KHR_shader_float16_int8
 - [ ] CANVAS/HANIEL integration (P56–P63 unlock track)
+
+---
+
+## ENTRY: axon_sel4 Rewrite Track — M1–M4
+Date: 2026-06-21
+Branch: sel4-rewrite
+Commit: 01c4b1e
+Tag: v0.sel4-m3
+
+### Milestones Completed
+
+M1 — Parser capability audit (R1–R6 probe rounds)
+  - Confirmed: return in if, struct literals, field access, if-else both branches
+  - Discovered: equality with identifier RHS fails when structs in scope
+  - Workaround: diff() helper, literal RHS only
+
+M2 — axon_sel4/ax/ipc.ax
+  - 15 items: CPtr, MessageInfo, IpcResult structs + FFI stubs + IPC primitives
+  - sel4_send, sel4_recv, axon_sel4_call, sel4_echo, ipc_ok, ipc_val
+  - axon check: OK
+
+M3 — axon_sel4/ax/sovereign_echo.ax
+  - 16 items: full IPC round-trip demo program
+  - sovereign_send → axon_sel4_call → verify_echo → main()
+  - axon build: seL4 object PASS, ABI check PASS
+  - ELF 64-bit LSB relocatable, ARM aarch64, 2.4K
+
+M4 — Evidence package
+  - EXHIBIT.md updated (NLNet artifact)
+  - AXON-SEL4-AUDIT.md written
+  - SOVEREIGNTY-LEDGER.md updated (this entry)
+
+### Codegen Fixes
+CF5–CF15: 11 LLVM IR codegen bugs found and fixed during seL4 target
+hardening. All pre-existing workspace tests pass post-fix.
+
+### Key Technical Finding
+The seL4 aarch64 target's stricter LLVM IR validation surfaced systemic
+type-width bugs (i32 vs i64) and struct ABI bugs (scalar store vs memcpy)
+that were latent in the x86 codegen path. The seL4 target effectively
+served as a proof-of-correctness pressure test for the entire codegen.
+
+Status: COMPLETE
