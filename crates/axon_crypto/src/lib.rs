@@ -13,3 +13,4 @@ pub use identity::{SovereignIdentity, fingerprint_of, sha256};
 pub use x25519::{X25519SecretKey, X25519PublicKey, derive_session_key};
 pub mod sha512;
 pub mod field;
+pub mod curve;

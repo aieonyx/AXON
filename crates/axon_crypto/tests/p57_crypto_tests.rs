@@ -3,8 +3,8 @@
 // P57 QA -- axon_crypto sovereign cryptography tests
 // Pass bar: 20/20
 use axon_crypto::{
-    SovereignIdentity, Ed25519KeyPair, Ed25519PublicKey,
-    X25519SecretKey, X25519PublicKey,
+    SovereignIdentity, Ed25519KeyPair,
+    X25519SecretKey,
     chacha20_encrypt, chacha20_decrypt,
     sha256, fingerprint_of, derive_session_key,
 };

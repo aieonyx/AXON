@@ -37,16 +37,19 @@ impl Sub for Fe25519 {
     ///   limb representation: [2*(2^51-19), 2*(2^51-1), 2*(2^51-1), 2*(2^51-1), 2*(2^51-1)]
     #[inline]
     fn sub(self, rhs: Self) -> Self {
+        // Use 4*p as the addend so subtraction is safe even on unreduced limbs.
+        // After a field multiply, limbs can reach ~2^52; 4*p limb[0] = 4*(2^51-19)
+        // which fits in u64 and is always >= any single unreduced limb.
         const MASK51: u64 = (1 << 51) - 1;
-        const TWO_P0:    u64 = 2 * (MASK51 - 18); // 2*(2^51 - 19)
-        const TWO_P1234: u64 = 2 * MASK51;         // 2*(2^51 - 1)
+        const FOUR_P0:    u64 = 4 * (MASK51 - 18); // 4*(2^51 - 19)
+        const FOUR_P1234: u64 = 4 * MASK51;         // 4*(2^51 - 1)
 
         Fe25519([
-            self.0[0] + TWO_P0    - rhs.0[0],
-            self.0[1] + TWO_P1234 - rhs.0[1],
-            self.0[2] + TWO_P1234 - rhs.0[2],
-            self.0[3] + TWO_P1234 - rhs.0[3],
-            self.0[4] + TWO_P1234 - rhs.0[4],
+            self.0[0] + FOUR_P0    - rhs.0[0],
+            self.0[1] + FOUR_P1234 - rhs.0[1],
+            self.0[2] + FOUR_P1234 - rhs.0[2],
+            self.0[3] + FOUR_P1234 - rhs.0[3],
+            self.0[4] + FOUR_P1234 - rhs.0[4],
         ])
     }
 }
@@ -270,9 +273,10 @@ impl Fe25519 {
 
         // Check: v * r^2 == u ? sqrt found.
         let check = v * r.square();
-        let correct_sign     = check.ct_eq(&u);
-        let flipped_sign     = check.ct_eq(&(-u));
-        let flipped_sign_i   = check.ct_eq(&((-u) * Fe25519::SQRT_M1));
+        let u_reduced = u.carry_reduce();
+        let correct_sign     = check.ct_eq(&u_reduced);
+        let flipped_sign     = check.ct_eq(&(-u_reduced));
+        let flipped_sign_i   = check.ct_eq(&((-u_reduced) * Fe25519::SQRT_M1));
 
         // If flipped: multiply by sqrt(-1)
         let r_prime = Fe25519::SQRT_M1 * r;
