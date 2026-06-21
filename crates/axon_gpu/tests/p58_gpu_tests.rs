@@ -193,3 +193,60 @@ fn test_backend_display() {
     assert_eq!(format!("{}", GpuBackend::Vulkan),      "Vulkan");
     assert_eq!(format!("{}", GpuBackend::CpuFallback), "CPU Fallback");
 }
+
+// ── P58.1 M2: Vulkan buffer tests ────────────────────────────────────────────
+
+#[cfg(feature = "vulkan")]
+mod vulkan_buffer_tests {
+    use axon_gpu::vulkan::{VulkanInstance, VulkanPhysicalDevice, VulkanLogicalDevice, VkGpuBuffer};
+
+    fn vk_context() -> Option<(VulkanInstance, VulkanPhysicalDevice, VulkanLogicalDevice)> {
+        let vi  = VulkanInstance::new().ok()?;
+        let vpd = VulkanPhysicalDevice::select(&vi).ok()?;
+        let ld  = VulkanLogicalDevice::new(&vi, &vpd).ok()?;
+        Some((vi, vpd, ld))
+    }
+
+    #[test]
+    fn test_vk_buffer_upload_download_roundtrip() {
+        let Some((vi, vpd, ld)) = vk_context() else { return; };
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let buf = VkGpuBuffer::new_device(&ld, &vpd.memory_props, (data.len()*4) as u64).unwrap();
+        buf.upload(&ld, &vpd.memory_props, &data).unwrap();
+        let out = buf.download(&ld, &vpd.memory_props, data.len()).unwrap();
+        assert_eq!(data, out, "upload/download round-trip failed");
+        buf.destroy(&ld);
+    }
+
+    #[test]
+    fn test_vk_buffer_zeros_roundtrip() {
+        let Some((vi, vpd, ld)) = vk_context() else { return; };
+        let data = vec![0.0f32; 16];
+        let buf = VkGpuBuffer::new_device(&ld, &vpd.memory_props, (data.len()*4) as u64).unwrap();
+        buf.upload(&ld, &vpd.memory_props, &data).unwrap();
+        let out = buf.download(&ld, &vpd.memory_props, data.len()).unwrap();
+        assert_eq!(data, out);
+        buf.destroy(&ld);
+    }
+
+    #[test]
+    fn test_vk_staging_buffer_alloc() {
+        let Some((vi, vpd, ld)) = vk_context() else { return; };
+        let staging = VkGpuBuffer::new_staging(&ld, &vpd.memory_props, 1024).unwrap();
+        assert!(staging.size >= 1024);
+        staging.destroy(&ld);
+    }
+
+    #[test]
+    fn test_vk_large_buffer_roundtrip() {
+        let Some((vi, vpd, ld)) = vk_context() else { return; };
+        let data: Vec<f32> = (0..4096).map(|i| i as f32 * 0.1).collect();
+        let buf = VkGpuBuffer::new_device(&ld, &vpd.memory_props, (data.len()*4) as u64).unwrap();
+        buf.upload(&ld, &vpd.memory_props, &data).unwrap();
+        let out = buf.download(&ld, &vpd.memory_props, data.len()).unwrap();
+        for (a, b) in data.iter().zip(out.iter()) {
+            assert!((a - b).abs() < 1e-6, "mismatch: {} != {}", a, b);
+        }
+        buf.destroy(&ld);
+    }
+}
