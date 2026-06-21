@@ -13,3 +13,5 @@ pub use module::{WasmModule, Export, FuncBody, WASM_MAGIC, WASM_VERSION};
 pub use runtime::WasmRuntime;
 pub use types::{ValType, FuncType, WasmValue};
 pub use validator::WasmValidator;
+
+pub mod jit;

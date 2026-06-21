@@ -163,3 +163,12 @@ pub fn read_leb128_u32(data: &[u8], pos: usize) -> WasmResult<(u32, usize)> {
     }
     Ok((result, i - pos))
 }
+
+// P61.1: WasmFunc — function body for JIT compilation
+#[derive(Debug, Clone)]
+pub struct WasmFunc {
+    pub type_idx: u32,
+    pub locals: Vec<crate::types::ValType>,
+    /// Raw WASM bytecode body (expression, including 0x0B end marker)
+    pub body: Vec<u8>,
+}
