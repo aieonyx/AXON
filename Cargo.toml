@@ -39,6 +39,8 @@ members = [
     "crates/axon_wasm",
     "crates/axon_font",
     "crates/axon_ai_runtime",
+    "crates/axon_lsp",
+    "crates/axon_registry",
     "axon_cli",
     "axon_sel4",
     "axon_math",
