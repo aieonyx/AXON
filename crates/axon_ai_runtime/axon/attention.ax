@@ -1,0 +1,128 @@
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// P63.1 — Transformer Attention in AXONYX
+// Sovereign scaled dot-product attention: Q/K/V projection, softmax, output
+
+extern fn ai_dot(a_ptr: i64, b_ptr: i64, len: i64) -> f32
+extern fn ai_softmax_inplace(ptr: i64, len: i64) -> i64
+extern fn ai_matmul_flat(a_ptr: i64, b_ptr: i64, c_ptr: i64,
+                         m: i64, n: i64, k: i64) -> i64
+extern fn ai_alloc_f32(len: i64) -> i64
+extern fn ai_set_f32(ptr: i64, idx: i64, val: f32) -> i64
+extern fn ai_get_f32(ptr: i64, idx: i64) -> f32
+extern fn ai_scale_inplace(ptr: i64, len: i64, scale: f32) -> i64
+extern fn ai_add_inplace(dst_ptr: i64, src_ptr: i64, len: i64) -> i64
+extern fn ai_relu_inplace(ptr: i64, len: i64) -> i64
+extern fn ai_free_f32(ptr: i64) -> i64
+
+fn compute_scores(q_ptr: i64, k_ptr: i64,
+                  seq_len: i64, d_k: i64) -> i64 {
+    let out_len = seq_len * seq_len
+    let scores = ai_alloc_f32(out_len)
+    let scale: f32 = 0.5
+    let i: i64 = 0
+    loop {
+        if i >= seq_len { break }
+        let j: i64 = 0
+        loop {
+            if j >= seq_len { break }
+            let q_row = q_ptr + i * d_k * 4
+            let k_row = k_ptr + j * d_k * 4
+            let dot_val = ai_dot(q_row, k_row, d_k)
+            let scaled: f32 = dot_val * scale
+            let idx = i * seq_len + j
+            ai_set_f32(scores, idx, scaled)
+            let j = j + 1
+        }
+        let i = i + 1
+    }
+    scores
+}
+
+fn softmax_rows(scores: i64, seq_len: i64) -> i64 {
+    let i: i64 = 0
+    loop {
+        if i >= seq_len { break }
+        let row_ptr = scores + i * seq_len * 4
+        ai_softmax_inplace(row_ptr, seq_len)
+        let i = i + 1
+    }
+    scores
+}
+
+fn attend(weights: i64, v_ptr: i64,
+          seq_len: i64, d_k: i64) -> i64 {
+    let out_len = seq_len * d_k
+    let out = ai_alloc_f32(out_len)
+    ai_matmul_flat(weights, v_ptr, out, seq_len, d_k, seq_len)
+    out
+}
+
+fn project(x_ptr: i64, w_ptr: i64,
+           seq_len: i64, d_model: i64, d_k: i64) -> i64 {
+    let out_len = seq_len * d_k
+    let out = ai_alloc_f32(out_len)
+    ai_matmul_flat(x_ptr, w_ptr, out, seq_len, d_k, d_model)
+    out
+}
+
+fn scaled_dot_product_attention(x_ptr: i64,
+                                wq_ptr: i64,
+                                wk_ptr: i64,
+                                wv_ptr: i64,
+                                seq_len: i64,
+                                d_model: i64,
+                                d_k: i64) -> i64 {
+    let q = project(x_ptr, wq_ptr, seq_len, d_model, d_k)
+    let k = project(x_ptr, wk_ptr, seq_len, d_model, d_k)
+    let v = project(x_ptr, wv_ptr, seq_len, d_model, d_k)
+    let scores = compute_scores(q, k, seq_len, d_k)
+    softmax_rows(scores, seq_len)
+    let attn_out = attend(scores, v, seq_len, d_k)
+    ai_free_f32(q)
+    ai_free_f32(k)
+    ai_free_f32(v)
+    ai_free_f32(scores)
+    attn_out
+}
+
+fn attention_main() -> i64 {
+    let seq_len: i64 = 4
+    let d_model: i64 = 8
+    let d_k: i64 = 4
+    let x_len = seq_len * d_model
+    let x = ai_alloc_f32(x_len)
+    let i: i64 = 0
+    loop {
+        if i >= seq_len { break }
+        let j: i64 = 0
+        loop {
+            if j >= d_model { break }
+            let val: f32 = 0.1 * (i + 1) * (j + 1)
+            ai_set_f32(x, i * d_model + j, val)
+            let j = j + 1
+        }
+        let i = i + 1
+    }
+    let w_len = d_model * d_k
+    let wq = ai_alloc_f32(w_len)
+    let wk = ai_alloc_f32(w_len)
+    let wv = ai_alloc_f32(w_len)
+    let i: i64 = 0
+    loop { if i >= w_len { break } ai_set_f32(wq, i, 0.0) let i = i + 1 }
+    let i: i64 = 0
+    loop { if i >= d_k { break } ai_set_f32(wq, i * d_k + i, 1.0) let i = i + 1 }
+    let i: i64 = 0
+    loop { if i >= w_len { break } ai_set_f32(wk, i, 0.0) let i = i + 1 }
+    let i: i64 = 0
+    loop { if i >= d_k { break } ai_set_f32(wk, i * d_k + i, 1.0) let i = i + 1 }
+    let i: i64 = 0
+    loop { if i >= w_len { break } ai_set_f32(wv, i, 0.0) let i = i + 1 }
+    let i: i64 = 0
+    loop { if i >= d_k { break } ai_set_f32(wv, i * d_k + i, 0.5) let i = i + 1 }
+    let out = scaled_dot_product_attention(x, wq, wk, wv, seq_len, d_model, d_k)
+    ai_free_f32(x)
+    ai_free_f32(wq)
+    ai_free_f32(wk)
+    ai_free_f32(wv)
+    out
+}

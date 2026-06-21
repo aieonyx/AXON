@@ -13,3 +13,5 @@ pub use graph::{ComputeGraph, GraphNode, NodeOp};
 pub use model::{SovereignModel, DenseLayer, Activation};
 pub use ops::{matmul, relu, sigmoid, tanh, softmax, add_bias, layer_norm, dot, cross_entropy};
 pub use tensor::Tensor;
+
+pub mod attention_ffi;
