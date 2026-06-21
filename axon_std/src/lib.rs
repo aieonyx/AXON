@@ -91,3 +91,8 @@ pub mod verify;
 // ── axon.audit (SL-08) ────────────────────────────────────────
 /// axon::audit — hash-chained audit trail, Sovereign Consent Doctrine.
 pub mod audit;
+
+// ── axon.sync (SL-09) ─────────────────────────────────────────
+/// axon::sync — sovereign synchronisation primitives.
+/// Channel<T> maps to seL4 IPC endpoints. Mutex for shared state.
+pub mod sync;
