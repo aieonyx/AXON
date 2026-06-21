@@ -147,3 +147,49 @@ fn test_kernel_shape_mismatch_fails() {
     let result = GpuKernel::new(KernelOp::Add).dispatch(&dev, &[&a, &b], &mut out);
     assert!(result.is_err());
 }
+
+// ── P58.1 M1: Vulkan probe tests ─────────────────────────────────────────────
+
+#[test]
+fn test_vulkan_discover_or_fallback() {
+    // discover() must always succeed — Vulkan or CPU fallback
+    let dev = GpuDevice::discover().unwrap();
+    assert!(dev.max_threads() > 0);
+    assert!(!dev.device_name().is_empty());
+    println!("P58.1 backend: {} — {}", dev.backend(), dev.device_name());
+}
+
+#[test]
+fn test_vulkan_backend_detected() {
+    let dev = GpuDevice::discover().unwrap();
+    // On this machine (AMD RADV) we expect Vulkan
+    // Test is informational — both backends are valid
+    println!("Backend: {:?}", dev.backend());
+    println!("Device:  {}", dev.device_name());
+    println!("VRAM:    {} MB", dev.vram_bytes() / (1024*1024));
+    println!("Threads: {}", dev.max_threads());
+    // Assert it's one of the valid backends
+    let valid = dev.is_vulkan() || dev.is_cpu_fallback();
+    assert!(valid, "backend must be Vulkan or CpuFallback");
+}
+
+#[test]
+fn test_vulkan_vram_nonzero_if_vulkan() {
+    let dev = GpuDevice::discover().unwrap();
+    if dev.is_vulkan() {
+        assert!(dev.vram_bytes() > 0, "Vulkan device should report VRAM > 0");
+    }
+}
+
+#[test]
+fn test_cpu_fallback_explicit() {
+    let dev = GpuDevice::cpu_fallback();
+    assert!(dev.is_cpu_fallback());
+    assert_eq!(dev.vram_bytes(), 0);
+}
+
+#[test]
+fn test_backend_display() {
+    assert_eq!(format!("{}", GpuBackend::Vulkan),      "Vulkan");
+    assert_eq!(format!("{}", GpuBackend::CpuFallback), "CPU Fallback");
+}

@@ -2,10 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 [package]
 name = "axon_gpu"
-version = "0.58.0"
+version = "0.58.1"
 edition = "2021"
 authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
-description = "axon_gpu — sovereign GPU compute abstraction. P58.0: CPU fallback. P58.1: Vulkan backend."
+description = "axon_gpu — sovereign GPU compute abstraction. P58.1: Vulkan backend."
 license = "Apache-2.0"
+
+[features]
+default = ["vulkan"]
+vulkan  = ["ash"]
+
 [dependencies]
+ash = { version = "0.38", optional = true }
+
 [dev-dependencies]
