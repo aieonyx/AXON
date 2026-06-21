@@ -1,0 +1,95 @@
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// axon_sel4/ax/ipc.ax — M2: seL4 IPC primitives
+// Target: aarch64-sel4 · Profile: seL4-strict
+
+struct CPtr {
+    val: i64
+}
+
+struct MessageInfo {
+    label: i64,
+    length: i64
+}
+
+struct IpcResult {
+    val: i64,
+    err: i64
+}
+
+// --- FFI boundary (resolved by axon_sel4 Rust shim) ---
+
+fn sel4_sys_send(dest: i64, label: i64, length: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_sys_recv(src: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_sys_call(dest: i64, label: i64, length: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_mr_get(idx: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_mr_set(idx: i64, val: i64) -> i64 {
+    return 0;
+}
+
+// --- IPC primitives ---
+
+fn sel4_send(dest: CPtr, msg: MessageInfo) -> IpcResult {
+    let rc = sel4_sys_send(dest.val, msg.label, msg.length);
+    if rc == 0 {
+        return IpcResult { val: 0, err: 0 };
+    }
+    return IpcResult { val: 0, err: rc };
+}
+
+fn sel4_recv(src: CPtr) -> IpcResult {
+    let raw = sel4_sys_recv(src.val);
+    if raw == 0 {
+        let mr0 = sel4_mr_get(0);
+        return IpcResult { val: mr0, err: 0 };
+    }
+    return IpcResult { val: 0, err: raw };
+}
+
+fn axon_sel4_call(dest: CPtr, msg: MessageInfo) -> IpcResult {
+    let rc = sel4_sys_call(dest.val, msg.label, msg.length);
+    if rc == 0 {
+        let reply = sel4_mr_get(0);
+        return IpcResult { val: reply, err: 0 };
+    }
+    return IpcResult { val: 0, err: rc };
+}
+
+fn sel4_echo(endpoint: CPtr) -> IpcResult {
+    let recv_rc = sel4_sys_recv(endpoint.val);
+    if recv_rc == 0 {
+        let data = sel4_mr_get(0);
+        let set_rc = sel4_mr_set(0, data);
+        let msg = MessageInfo { label: 0, length: 1 };
+        let send_rc = sel4_sys_send(endpoint.val, msg.label, msg.length);
+        if send_rc == 0 {
+            return IpcResult { val: data, err: 0 };
+        }
+        return IpcResult { val: 0, err: send_rc };
+    }
+    return IpcResult { val: 0, err: recv_rc };
+}
+
+fn ipc_ok(r: IpcResult) -> i64 {
+    return r.err;
+}
+
+fn ipc_val(r: IpcResult) -> i64 {
+    return r.val;
+}
+
+fn main() -> i64 {
+    return 0;
+}

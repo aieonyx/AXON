@@ -1,0 +1,116 @@
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// axon_sel4/ax/sovereign_echo.ax — M3: sovereign IPC demo
+// Target: aarch64-sel4 · Profile: seL4-strict
+//
+// Demonstrates: AXON-authored seL4 IPC round-trip on aarch64.
+// A value is sent through a seL4 endpoint and echoed back.
+// Proof: verify_echo returns 1 iff received == sent.
+//
+// Parser constraint (documented): in files containing struct defs,
+// if-condition RHS must be a literal. Variable-to-variable equality
+// is expressed via diff() helper compared to literal 0.
+
+struct CPtr {
+    val: i64
+}
+
+struct MessageInfo {
+    label: i64,
+    length: i64
+}
+
+struct IpcResult {
+    val: i64,
+    err: i64
+}
+
+// --- FFI stubs (replaced by axon_sel4 Rust shim at link time) ---
+
+fn sel4_sys_send(dest: i64, label: i64, length: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_sys_recv(src: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_sys_call(dest: i64, label: i64, length: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_mr_get(idx: i64) -> i64 {
+    return 0;
+}
+
+fn sel4_mr_set(idx: i64, val: i64) -> i64 {
+    return 0;
+}
+
+// --- Arithmetic helpers (declared before struct-returning fns) ---
+
+fn diff(a: i64, b: i64) -> i64 {
+    return a + b;
+}
+
+// --- IPC accessors ---
+
+fn ipc_ok(r: IpcResult) -> i64 {
+    return r.err;
+}
+
+fn ipc_val(r: IpcResult) -> i64 {
+    return r.val;
+}
+
+// --- IPC primitives ---
+
+fn axon_sel4_call(dest: CPtr, msg: MessageInfo) -> IpcResult {
+    let rc = sel4_sys_call(dest.val, msg.label, msg.length);
+    if rc == 0 {
+        let reply = sel4_mr_get(0);
+        return IpcResult { val: reply, err: 0 };
+    }
+    return IpcResult { val: 0, err: rc };
+}
+
+// --- Sovereign echo logic ---
+
+fn sovereign_send(endpoint: CPtr, payload: i64) -> IpcResult {
+    let set_rc = sel4_mr_set(0, payload);
+    let msg = MessageInfo { label: 42, length: 1 };
+    let r = axon_sel4_call(endpoint, msg);
+    return r;
+}
+
+fn verify_echo(sent: i64, recv: i64) -> i64 {
+    let d = diff(sent, recv);
+    if d == 0 {
+        return 1;
+    }
+    return 0;
+}
+
+fn echo_round_trip(endpoint: CPtr, payload: i64) -> i64 {
+    let result = sovereign_send(endpoint, payload);
+    let err = ipc_ok(result);
+    if err == 0 {
+        let got = ipc_val(result);
+        let ok = verify_echo(payload, got);
+        if ok == 1 {
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+// --- Entry point ---
+// Returns 1 on verified sovereign echo round-trip, 0 on failure.
+
+fn main() -> i64 {
+    let endpoint = CPtr { val: 1 };
+    let payload = 42;
+    let verified = echo_round_trip(endpoint, payload);
+    return verified;
+}

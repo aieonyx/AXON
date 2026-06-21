@@ -51,8 +51,10 @@ pub fn emit_llvm_ty(ty: &HirTy) -> &'static str {
         // CF5: Infer is a type hole from HIR lowerer.
         // Expression nodes legitimately carry Infer until inference writes back (Profile Stage).
         // Function signatures must be concrete — checked separately in emit_fn.
-        HirTy::Infer  => "i32",
-        _             => "i32",
+        // CF7-FIX: named user types (structs) → ptr in scalar/load context
+        HirTy::Named(_, _) => "ptr",
+        HirTy::Infer  => "i64",  // CF5-FIX: sovereign default is i64, not i32
+        _             => "i64",  // catch-all: unknown types default to i64 word size
     }
 }
 
@@ -71,6 +73,8 @@ pub fn emit_llvm_ty_owned(ty: &HirTy) -> String {
             let err_ty = args.get(1).map(emit_llvm_ty_owned).unwrap_or_else(|| "i64".to_string());
             format!("{{ i1, {}, {} }}", ok_ty, err_ty)
         }
+        // CF7-FIX: user-defined struct types → %struct.Name (ptr-sized in alloca context)
+        HirTy::Named(n, _) => format!("%struct.{}", n),
         _ => emit_llvm_ty(ty).to_string(),
     }
 }
@@ -81,11 +85,13 @@ struct SsaNames {
     pub place_map: HashMap<PlaceId, String>,
     // P13-M3-PLACE-TYPE: tracks LLVM type for each place (overrides HIR Infer)
     pub place_type_map: HashMap<PlaceId, String>,
+    // CF10-FIX: tracks struct name for places whose HIR type is Infer (struct params)
+    pub place_struct_map: HashMap<PlaceId, String>,
 }
 
 impl SsaNames {
     fn new() -> Self {
-        SsaNames { place_counter: 0, tmp_counter: 0, place_map: HashMap::new(), place_type_map: HashMap::new() }
+        SsaNames { place_counter: 0, tmp_counter: 0, place_map: HashMap::new(), place_type_map: HashMap::new(), place_struct_map: HashMap::new() }
     }
     fn place_name(&mut self, place: PlaceId) -> String {
         if let Some(name) = self.place_map.get(&place) { return name.clone(); }
@@ -108,6 +114,10 @@ pub struct LlvmEmitter {
     errors: Vec<String>,
     /// Maps param index → alloca name for current function
     param_allocas: Vec<String>,
+    /// Return type of the current function being emitted (for ret type resolution)
+    current_fn_ret: HirTy,
+    /// CF12-FIX: maps fn name → LLVM return type string for call site resolution
+    fn_ret_map: HashMap<String, String>,
     /// Set to true when a ret instruction has been emitted in current fn
     fn_returned: bool,
     /// M2: accumulated LLVM global string constants
@@ -121,7 +131,7 @@ pub struct LlvmEmitter {
 #[allow(clippy::new_without_default)]
 impl LlvmEmitter {
     pub fn new() -> Self {
-        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, string_literals: Vec::new(), struct_defs: std::collections::HashMap::new(), vtable_registry: std::collections::HashMap::new() }
+        LlvmEmitter { output: String::new(), ssa: SsaNames::new(), errors: Vec::new(), param_allocas: Vec::new(), fn_returned: false, current_fn_ret: HirTy::Unit, fn_ret_map: HashMap::new(), string_literals: Vec::new(), struct_defs: std::collections::HashMap::new(), vtable_registry: std::collections::HashMap::new() }
     }
     fn emit_line(&mut self, line: &str) {
         self.output.push_str(line);
@@ -319,12 +329,24 @@ impl LlvmEmitter {
         } else {
             String::new()
         };
+        // CF11-FIX: struct return types emit as ptr (returned by alloca pointer)
+        let emit_ret_ty = match &f.ret {
+            HirTy::Named(_, _) => "ptr".to_string(),
+            _ => ret_ty.to_string(),
+        };
         if matches!(f.ret, HirTy::Unit | HirTy::Never) {
             self.emit_line(&format!("define {}void @{}({}){}{}  {{", linkage, fn_name, params.join(", "), section_attr, stack_attr));
         } else {
-            self.emit_line(&format!("define {}{} @{}({}){}{}  {{", linkage, ret_ty, fn_name, params.join(", "), section_attr, stack_attr));
+            self.emit_line(&format!("define {}{} @{}({}){}{}  {{", linkage, emit_ret_ty, fn_name, params.join(", "), section_attr, stack_attr));
         }
         self.emit_line("entry:");
+        self.current_fn_ret = f.ret.clone();
+        // CF12-FIX: register this fn's return type for call site resolution
+        let fn_ret_llty = match &f.ret {
+            HirTy::Named(_, _) => "ptr".to_string(),
+            _ => emit_llvm_ty(&f.ret).to_string(),
+        };
+        self.fn_ret_map.insert(fn_name.clone(), fn_ret_llty);
         self.param_allocas.clear();
         for (place, ty) in &f.params {
             let param_val = self.ssa.place_name(*place);
@@ -334,6 +356,11 @@ impl LlvmEmitter {
             self.emit_line(&format!("  store {} {}, ptr {}", llty, param_val, alloca));
             // Register alloca in place_map so Place(id) resolves correctly
             self.ssa.place_map.insert(*place, alloca.clone());
+            // CF10-FIX: register param type and struct name for field access resolution
+            self.ssa.place_type_map.insert(*place, llty.to_string());
+            if let HirTy::Named(sname, _) = ty {
+                self.ssa.place_struct_map.insert(*place, sname.clone());
+            }
             self.param_allocas.push(alloca);
         }
         let body_val = self.emit_expr(&f.body);
@@ -393,7 +420,19 @@ impl LlvmEmitter {
                 let lv = self.emit_expr(lhs)?;
                 let rv = self.emit_expr(rhs)?;
                 let tmp = self.ssa.fresh_tmp();
-                let ty = emit_llvm_ty(&lhs.ty);
+                // CF13-FIX: resolve BinOp type via place_type_map for Infer lhs
+                let ty_owned: String = if matches!(&lhs.ty, HirTy::Infer) {
+                    if let HirExprKind::Place(place, _) = &lhs.kind {
+                        self.ssa.place_type_map.get(place)
+                            .cloned()
+                            .unwrap_or_else(|| emit_llvm_ty(&lhs.ty).to_string())
+                    } else {
+                        emit_llvm_ty(&lhs.ty).to_string()
+                    }
+                } else {
+                    emit_llvm_ty(&lhs.ty).to_string()
+                };
+                let ty: &str = &ty_owned;
                 let instr = self.binop_instr(op, &lhs.ty);
                 self.emit_line(&format!("  {} = {} {} {}, {}", tmp, instr, ty, lv, rv));
                 Some(tmp)
@@ -434,7 +473,16 @@ impl LlvmEmitter {
             HirExprKind::Return(val) => {
                 if let Some(v) = val {
                     if let Some(rv) = self.emit_expr(v) {
-                        let ty = emit_llvm_ty(&v.ty);
+                        // CF11-FIX: struct return values are ptr (alloca address)
+                        // For Infer, use current_fn_ret to get the correct concrete type
+                        let ty = match &v.ty {
+                            HirTy::Named(_, _) => "ptr",
+                            HirTy::Infer => match &self.current_fn_ret {
+                                HirTy::Named(_, _) => "ptr",
+                                t => emit_llvm_ty(t),
+                            },
+                            _ => emit_llvm_ty(&v.ty),
+                        };
                         self.emit_line(&format!("  ret {} {}", ty, rv));
                     } else {
                         self.emit_line("  ret void");
@@ -802,10 +850,21 @@ impl LlvmEmitter {
                 let mut arg_strs = Vec::new();
                 for arg in args {
                     if let Some(v) = self.emit_expr(arg) {
-                        arg_strs.push(format!("{} {}", emit_llvm_ty(&arg.ty), v));
+                        // CF9-FIX: resolve arg type via place_type_map for struct/Infer args
+                        let arg_ty = if let HirExprKind::Place(place, _) = &arg.kind {
+                            self.ssa.place_type_map.get(place)
+                                .cloned()
+                                .unwrap_or_else(|| emit_llvm_ty(&arg.ty).to_string())
+                        } else {
+                            emit_llvm_ty(&arg.ty).to_string()
+                        };
+                        arg_strs.push(format!("{} {}", arg_ty, v));
                     }
                 }
-                let ret_ty = emit_llvm_ty(&expr.ty);
+                // CF12-FIX: resolve call return type from fn_ret_map, then expr type
+                let ret_ty = self.fn_ret_map.get(&fn_name)
+                    .cloned()
+                    .unwrap_or_else(|| emit_llvm_ty(&expr.ty).to_string());
                 if ret_ty == "void" {
                     self.emit_line(&format!("  call void @{}({})", fn_name, arg_strs.join(", ")));
                     None
@@ -1144,7 +1203,14 @@ impl LlvmEmitter {
             HirExprKind::Field(base, fname, place_id) => {
                 let struct_name = match &base.ty {
                     HirTy::Named(n, _) => n.clone(),
-                    _ => String::new(),
+                    _ => {
+                        // CF10-FIX: look up struct name from place_struct_map when ty is Infer
+                        if let HirExprKind::Place(p, _) = &base.kind {
+                            self.ssa.place_struct_map.get(p).cloned().unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
+                    }
                 };
                 let base_ptr = self.emit_expr(base)?;
                 let field_names = self.struct_defs.get(&struct_name).cloned().unwrap_or_default();
@@ -1165,7 +1231,20 @@ impl LlvmEmitter {
             // P14-M2: match expression — icmp chain + phi merge
             HirExprKind::Match(scrutinee, arms) => {
                 let scrut = self.emit_expr(scrutinee)?;
-                let scrut_ty = emit_llvm_ty(&scrutinee.ty);
+                // CF14-FIX: resolve scrutinee type via place_type_map for Infer
+                // Use owned String to avoid holding borrow on self.ssa across emit_line calls
+                let scrut_ty: String = if matches!(&scrutinee.ty, HirTy::Infer) {
+                    if let HirExprKind::Place(place, _) = &scrutinee.kind {
+                        self.ssa.place_type_map.get(place)
+                            .cloned()
+                            .unwrap_or_else(|| emit_llvm_ty(&scrutinee.ty).to_string())
+                    } else {
+                        emit_llvm_ty(&scrutinee.ty).to_string()
+                    }
+                } else {
+                    emit_llvm_ty(&scrutinee.ty).to_string()
+                };
+                let scrut_ty: &str = &scrut_ty;
                 let n = self.ssa.tmp_counter;
                 self.ssa.tmp_counter += (arms.len() * 2 + 2) as u32;
                 let merge_l = format!("match_merge_{}", n + (arms.len() * 2) as u32);
@@ -1241,7 +1320,14 @@ impl LlvmEmitter {
                 self.emit_line(&format!("{}:", merge_l));
                 if phi_entries.len() == arms.len() {
                     // All arms produce a value — emit phi
-                    let result_ty = emit_llvm_ty(&expr.ty);
+                    // CF15-FIX: match expr.ty is Infer; use current_fn_ret or scrut_ty
+                    let result_ty = match &expr.ty {
+                        HirTy::Infer => match &self.current_fn_ret {
+                            HirTy::Named(_, _) => "ptr",
+                            t => emit_llvm_ty(t),
+                        },
+                        t => emit_llvm_ty(t),
+                    };
                     let phi = self.ssa.fresh_tmp();
                     let phi_args: String = phi_entries.iter()
                         .map(|(v, lbl)| format!("[ {}, %{} ]", v, lbl))
@@ -1375,15 +1461,63 @@ impl LlvmEmitter {
                         }
                     }
                 }
-                let llty = emit_llvm_ty_owned(ty);
+                // CF8-FIX: if ty is Infer, infer from init expression
+                let llty = match init {
+                    Some(ie) => match &ie.kind {
+                        HirExprKind::Struct(name, _) => format!("%struct.{}", name),
+                        HirExprKind::Call(func, _) => {
+                            // CF12-FIX: look up callee return type from fn_ret_map
+                            let fname = match &func.kind {
+                                HirExprKind::Path(segs) => segs.join("_"),
+                                _ => String::new(),
+                            };
+                            self.fn_ret_map.get(&fname)
+                                .cloned()
+                                .unwrap_or_else(|| emit_llvm_ty_owned(ty))
+                        },
+                        HirExprKind::BinOp(_, lhs, _) => {
+                            // CF15b-FIX: BinOp result type follows lhs type
+                            if matches!(&lhs.ty, HirTy::Infer) {
+                                if let HirExprKind::Place(place, _) = &lhs.kind {
+                                    self.ssa.place_type_map.get(place)
+                                        .cloned()
+                                        .unwrap_or_else(|| emit_llvm_ty_owned(ty))
+                                } else {
+                                    emit_llvm_ty_owned(ty)
+                                }
+                            } else {
+                                emit_llvm_ty_owned(&lhs.ty)
+                            }
+                        },
+                        _ => emit_llvm_ty_owned(ty),
+                    },
+                    None => emit_llvm_ty_owned(ty),
+                };
                 let alloca = self.ssa.fresh_tmp();
                 self.emit_line(&format!("  {} = alloca {}", alloca, llty));
                 // Register in place_map so Place(id) resolves to this alloca
                 self.ssa.place_map.insert(*place, alloca.clone());
+                // CF8-FIX: struct places load as ptr (structs passed by reference)
+                let place_load_ty = if llty.starts_with("%struct.") {
+                    "ptr".to_string()
+                } else {
+                    llty.clone()
+                };
+                self.ssa.place_type_map.insert(*place, place_load_ty);
                 if let Some(ie) = init {
                     if let Some(v) = self.emit_expr(ie) {
-                        let ity = emit_llvm_ty(&ie.ty);
-                        self.emit_line(&format!("  store {} {}, ptr {}", ity, v, alloca));
+                        let is_struct = llty.starts_with("%struct.");
+                        if is_struct {
+                            // struct value: src alloca IS the value — point place_map directly
+                            // No alloca needed: replace the i64 alloca with the struct alloca
+                            // We already allocated above; memcpy src→dest
+                            self.emit_line(&format!(
+                                "  call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 64, i1 false)",
+                                alloca, v
+                            ));
+                        } else {
+                            self.emit_line(&format!("  store {} {}, ptr {}", llty, v, alloca));
+                        }
                     }
                 }
             }
