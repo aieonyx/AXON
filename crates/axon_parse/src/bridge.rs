@@ -84,8 +84,10 @@ fn parse_program(s: &mut TokenStream) -> ParseResult<Program> {
 }
 
 fn parse_item(s: &mut TokenStream) -> ParseResult<Item> {
+    // Collect any decorator tokens before the item keyword
+    let decorators = parse_decorators(s)?;
     match s.peek() {
-        Token::Fn     => parse_fn(s),
+        Token::Fn     => parse_fn_with_decorators(s, decorators),
         Token::Struct => parse_struct(s),
         other => Err(ParseError::UnexpectedToken(
             AxString::ax_from_str(&format!("expected item, got {:?}", other))
@@ -93,7 +95,25 @@ fn parse_item(s: &mut TokenStream) -> ParseResult<Item> {
     }
 }
 
-fn parse_fn(s: &mut TokenStream) -> ParseResult<Item> {
+fn parse_decorators(s: &mut TokenStream) -> ParseResult<Vec<Decorator>> {
+    let mut decorators = Vec::new();
+    loop {
+        match s.peek() {
+            Token::DecoratorConstantTime => {
+                s.advance();
+                decorators.push(Decorator::ConstantTime);
+            }
+            Token::DecoratorDeterministic => {
+                s.advance();
+                decorators.push(Decorator::Deterministic);
+            }
+            _ => break,
+        }
+    }
+    Ok(decorators)
+}
+
+fn parse_fn_with_decorators(s: &mut TokenStream, decorators: Vec<Decorator>) -> ParseResult<Item> {
     s.advance(); // consume fn
     let name = s.expect_ident()?;
     s.expect(&Token::LParen)?;
@@ -103,13 +123,17 @@ fn parse_fn(s: &mut TokenStream) -> ParseResult<Item> {
     let ret = parse_sovereign_ty(s)?;
     let body = parse_block_stmts(s)?;
     Ok(Item::Fn {
-        decorators: vec![],
+        decorators,
         name,
         uses: vec![],
         params,
         ret,
         body,
     })
+}
+
+fn parse_fn(s: &mut TokenStream) -> ParseResult<Item> {
+    parse_fn_with_decorators(s, vec![])
 }
 
 fn parse_params(s: &mut TokenStream) -> ParseResult<Vec<Param>> {

@@ -114,7 +114,24 @@ pub fn lex_next(cursor: &mut Cursor) -> LexResult<Token> {
             if cursor.peek() == ':' { cursor.advance(); Ok(Token::ColonColon) }
             else { Ok(Token::Colon) }
         }
+        '@' => lex_decorator(cursor),
         other => Ok(Token::Unknown(other)),
+    }
+}
+
+fn lex_decorator(cursor: &mut Cursor) -> LexResult<Token> {
+    // Read the decorator name after '@'
+    let mut name = String::new();
+    while cursor.peek().is_alphanumeric() || cursor.peek() == '_' {
+        name.push(cursor.advance());
+    }
+    match name.as_str() {
+        "constant_time"        => Ok(Token::DecoratorConstantTime),
+        "deterministic"        => Ok(Token::DecoratorDeterministic),
+        "sealed_memory"        => Ok(Token::DecoratorSealedMemory),
+        "balanced"             => Ok(Token::DecoratorBalanced),
+        "atomic_financial"     => Ok(Token::DecoratorAtomicFinancial),
+        other => Ok(Token::Unknown('@')), // unknown decorator falls through
     }
 }
 
