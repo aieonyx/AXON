@@ -96,3 +96,8 @@ pub mod audit;
 /// axon::sync — sovereign synchronisation primitives.
 /// Channel<T> maps to seL4 IPC endpoints. Mutex for shared state.
 pub mod sync;
+
+// ── axon.mem (SL-10) ──────────────────────────────────────────
+/// axon::mem — sovereign memory primitives.
+/// Zeroize for key material, BoundedBuffer for IPC payloads, MemRegion for seL4 frames.
+pub mod mem;
