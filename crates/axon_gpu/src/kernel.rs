@@ -33,6 +33,11 @@ impl GpuKernel {
         inputs:  &[&GpuBuffer],
         output:  &mut GpuBuffer,
     ) -> GpuResult<()> {
+        // P58.1: route to Vulkan compute if device is Vulkan
+        #[cfg(feature = "vulkan")]
+        if _device.is_vulkan() {
+            return self.dispatch_vulkan_path(_device, inputs, output);
+        }
         match &self.op {
             KernelOp::Add => {
                 if inputs.len() < 2 { return Err(GpuError::KernelFailed("Add requires 2 inputs".into())); }
@@ -100,6 +105,49 @@ impl GpuKernel {
                 }
             }
         }
+        Ok(())
+    }
+
+    #[cfg(feature = "vulkan")]
+    fn dispatch_vulkan_path(
+        &self,
+        _device: &GpuDevice,
+        inputs:  &[&GpuBuffer],
+        output:  &mut GpuBuffer,
+    ) -> GpuResult<()> {
+        use crate::vulkan::{VulkanInstance, VulkanPhysicalDevice, VulkanLogicalDevice, VkGpuBuffer};
+        use crate::vulkan::dispatch_vulkan;
+
+        // Create Vulkan context (cached in production, created per-dispatch in M3)
+        let vi  = VulkanInstance::new()?;
+        let vpd = VulkanPhysicalDevice::select(&vi)?;
+        let ld  = VulkanLogicalDevice::new(&vi, &vpd)?;
+
+        // Upload inputs to device memory
+        let vk_inputs: Vec<VkGpuBuffer> = inputs.iter().map(|buf| {
+            let data = buf.as_slice();
+            let vkbuf = VkGpuBuffer::new_device(&ld, &vpd.memory_props,
+                (data.len() * 4) as u64)?;
+            vkbuf.upload(&ld, &vpd.memory_props, data)?;
+            Ok(vkbuf)
+        }).collect::<GpuResult<Vec<_>>>()?;
+
+        // Allocate output device buffer
+        let out_size = (output.len * 4) as u64;
+        let vk_out = VkGpuBuffer::new_device(&ld, &vpd.memory_props, out_size)?;
+
+        // Dispatch kernel
+        let vk_input_refs: Vec<&VkGpuBuffer> = vk_inputs.iter().collect();
+        dispatch_vulkan(&self.op, &ld, &vpd, &vk_input_refs, &vk_out)?;
+
+        // Download results back to CPU buffer
+        let result = vk_out.download(&ld, &vpd.memory_props, output.len)?;
+        output.as_mut_slice().copy_from_slice(&result);
+
+        // Cleanup
+        for vkbuf in &vk_inputs { vkbuf.destroy(&ld); }
+        vk_out.destroy(&ld);
+
         Ok(())
     }
 }

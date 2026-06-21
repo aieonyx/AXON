@@ -5,8 +5,9 @@ name = "axon_gpu"
 version = "0.58.1"
 edition = "2021"
 authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
-description = "axon_gpu — sovereign GPU compute abstraction. P58.1: Vulkan backend."
+description = "axon_gpu -- sovereign GPU compute. P58.1: Vulkan + SPIR-V kernels."
 license = "Apache-2.0"
+build = "build.rs"
 
 [features]
 default = ["vulkan"]
@@ -14,5 +15,8 @@ vulkan  = ["ash"]
 
 [dependencies]
 ash = { version = "0.38", optional = true }
+
+[build-dependencies]
+naga = { version = "0.20", features = ["glsl-in", "spv-out"] }
 
 [dev-dependencies]

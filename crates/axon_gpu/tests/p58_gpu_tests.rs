@@ -250,3 +250,79 @@ mod vulkan_buffer_tests {
         buf.destroy(&ld);
     }
 }
+
+// ── P58.1 M3: Vulkan compute kernel tests ────────────────────────────────────
+
+#[cfg(feature = "vulkan")]
+mod vulkan_kernel_tests {
+    use axon_gpu::{GpuDevice, GpuBuffer, BufferKind, GpuKernel, KernelOp};
+
+    fn vk_device() -> Option<GpuDevice> {
+        let dev = GpuDevice::discover().ok()?;
+        if dev.is_vulkan() { Some(dev) } else { None }
+    }
+
+    #[test]
+    fn test_vk_kernel_add() {
+        let Some(dev) = vk_device() else { return; };
+        let a   = GpuBuffer::from_slice(BufferKind::Input, &[1.0f32, 2.0, 3.0, 4.0]).unwrap();
+        let b   = GpuBuffer::from_slice(BufferKind::Input, &[10.0f32, 20.0, 30.0, 40.0]).unwrap();
+        let mut out = GpuBuffer::zeros(BufferKind::Output, 4).unwrap();
+        GpuKernel::new(KernelOp::Add).dispatch(&dev, &[&a, &b], &mut out).unwrap();
+        let r = out.to_vec();
+        assert!((r[0]-11.0).abs()<1e-5 && (r[1]-22.0).abs()<1e-5 &&
+                (r[2]-33.0).abs()<1e-5 && (r[3]-44.0).abs()<1e-5,
+                "VK Add failed: {:?}", r);
+    }
+
+    #[test]
+    fn test_vk_kernel_mul() {
+        let Some(dev) = vk_device() else { return; };
+        let a   = GpuBuffer::from_slice(BufferKind::Input, &[2.0f32, 3.0, 4.0]).unwrap();
+        let b   = GpuBuffer::from_slice(BufferKind::Input, &[5.0f32, 6.0, 7.0]).unwrap();
+        let mut out = GpuBuffer::zeros(BufferKind::Output, 3).unwrap();
+        GpuKernel::new(KernelOp::Mul).dispatch(&dev, &[&a, &b], &mut out).unwrap();
+        let r = out.to_vec();
+        assert!((r[0]-10.0).abs()<1e-5 && (r[1]-18.0).abs()<1e-5 && (r[2]-28.0).abs()<1e-5,
+                "VK Mul failed: {:?}", r);
+    }
+
+    #[test]
+    fn test_vk_kernel_scale() {
+        let Some(dev) = vk_device() else { return; };
+        let a   = GpuBuffer::from_slice(BufferKind::Input, &[1.0f32, 2.0, 3.0, 4.0]).unwrap();
+        let mut out = GpuBuffer::zeros(BufferKind::Output, 4).unwrap();
+        GpuKernel::new(KernelOp::Scale(3.0)).dispatch(&dev, &[&a], &mut out).unwrap();
+        let r = out.to_vec();
+        assert!((r[0]-3.0).abs()<1e-5 && (r[1]-6.0).abs()<1e-5 &&
+                (r[2]-9.0).abs()<1e-5 && (r[3]-12.0).abs()<1e-5,
+                "VK Scale failed: {:?}", r);
+    }
+
+    #[test]
+    fn test_vk_kernel_relu() {
+        let Some(dev) = vk_device() else { return; };
+        let a   = GpuBuffer::from_slice(BufferKind::Input, &[-2.0f32, -1.0, 0.0, 1.0, 2.0]).unwrap();
+        let mut out = GpuBuffer::zeros(BufferKind::Output, 5).unwrap();
+        GpuKernel::new(KernelOp::ReLU).dispatch(&dev, &[&a], &mut out).unwrap();
+        let r = out.to_vec();
+        assert!((r[0]-0.0).abs()<1e-5 && (r[1]-0.0).abs()<1e-5 &&
+                (r[2]-0.0).abs()<1e-5 && (r[3]-1.0).abs()<1e-5 && (r[4]-2.0).abs()<1e-5,
+                "VK ReLU failed: {:?}", r);
+    }
+
+    #[test]
+    fn test_vk_kernel_matmul_2x2() {
+        let Some(dev) = vk_device() else { return; };
+        // [[1,2],[3,4]] * [[5,6],[7,8]] = [[19,22],[43,50]]
+        let a   = GpuBuffer::from_slice(BufferKind::Input, &[1.0f32,2.0,3.0,4.0]).unwrap();
+        let b   = GpuBuffer::from_slice(BufferKind::Input, &[5.0f32,6.0,7.0,8.0]).unwrap();
+        let mut out = GpuBuffer::zeros(BufferKind::Output, 4).unwrap();
+        GpuKernel::new(KernelOp::MatMul{rows:2,cols:2,inner:2})
+            .dispatch(&dev, &[&a,&b], &mut out).unwrap();
+        let r = out.to_vec();
+        assert!((r[0]-19.0).abs()<1e-4 && (r[1]-22.0).abs()<1e-4 &&
+                (r[2]-43.0).abs()<1e-4 && (r[3]-50.0).abs()<1e-4,
+                "VK MatMul 2x2 failed: {:?}", r);
+    }
+}
