@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "axon_awp_ffi",
+    "crates/axon_awp",
     "axon_core",
     "axon_fs",
     "axon_genesis",

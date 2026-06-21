@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+[package]
+name = "axon_awp"
+version = "0.66.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_awp — AXONYX sovereign AWP protocol: address, parser, router, FFI"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+[dev-dependencies]
