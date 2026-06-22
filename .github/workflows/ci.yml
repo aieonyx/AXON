@@ -10,6 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install LLVM
+        run: sudo apt-get install -y llvm lld
       - name: Run axon_parser tests
         run: cargo test -p axon_parser -- --test-threads=1
       - name: Run axon_crypto tests
