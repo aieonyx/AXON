@@ -7,7 +7,7 @@ use std::alloc::{alloc, Layout};
 pub extern "C" fn ai_alloc_f32(len: i64) -> i64 {
     if len <= 0 { return 0; }
     let layout = Layout::array::<f32>(len as usize).unwrap();
-    unsafe { alloc(layout) } as i64
+    (unsafe { alloc(layout) }) as i64
 }
 
 #[no_mangle]

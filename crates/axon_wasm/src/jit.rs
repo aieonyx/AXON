@@ -3,8 +3,7 @@
 // Single-pass WASM bytecode → x86_64 machine code, no external JIT library.
 
 use crate::error::WasmError;
-use crate::module::{WasmModule, WasmFunc};
-use crate::types::ValType;
+use crate::module::WasmFunc;
 
 // ── Executable code buffer ────────────────────────────────────────────────────
 
@@ -24,7 +23,7 @@ impl CodeBuffer {
             libc_mmap(size)
         };
         if ptr.is_null() {
-            return Err(WasmError::Trap("jit: mmap failed".into()));
+            return Err(WasmError::ValidationFailed("jit: mmap failed".into()));
         }
         Ok(Self { ptr, len: size, pos: 0 })
     }
@@ -33,7 +32,7 @@ impl CodeBuffer {
     #[inline]
     pub fn emit_u8(&mut self, b: u8) -> Result<(), WasmError> {
         if self.pos >= self.len {
-            return Err(WasmError::Trap("jit: code buffer overflow".into()));
+            return Err(WasmError::ValidationFailed("jit: code buffer overflow".into()));
         }
         unsafe { self.ptr.add(self.pos).write(b); }
         self.pos += 1;
@@ -179,7 +178,7 @@ impl<'a> X64Emitter<'a> {
     /// Push rax onto the JIT value stack (store to next slot).
     fn push_rax(&mut self) -> Result<(), WasmError> {
         if self.stack_depth >= MAX_STACK {
-            return Err(WasmError::Trap("jit: stack overflow".into()));
+            return Err(WasmError::StackOverflow);
         }
         // slot offset from rbp: -(16 + depth*8)
         let off = -((16 + self.stack_depth as i32 * SLOT) as i32);
@@ -193,7 +192,7 @@ impl<'a> X64Emitter<'a> {
     /// Pop top of JIT value stack into rax.
     fn pop_rax(&mut self) -> Result<(), WasmError> {
         if self.stack_depth == 0 {
-            return Err(WasmError::Trap("jit: stack underflow".into()));
+            return Err(WasmError::StackUnderflow);
         }
         self.stack_depth -= 1;
         let off = -((16 + self.stack_depth as i32 * SLOT) as i32);
@@ -206,7 +205,7 @@ impl<'a> X64Emitter<'a> {
     /// Peek at top (rax) without decrementing depth.
     fn peek_rax(&mut self) -> Result<(), WasmError> {
         if self.stack_depth == 0 {
-            return Err(WasmError::Trap("jit: peek on empty stack".into()));
+            return Err(WasmError::StackUnderflow);
         }
         let off = -((16 + (self.stack_depth as i32 - 1) * SLOT) as i32);
         self.buf.emit_bytes(&[0x48, 0x8B, 0x85])?;
@@ -237,72 +236,88 @@ impl<'a> X64Emitter<'a> {
 
     /// i32.add / i64.add
     pub fn emit_add(&mut self) -> Result<(), WasmError> {
-        self.pop_rax()?;                       // rax = b
-        // mov rcx, [rbp + top_slot]           (rcx = a)
-        let off = -((16 + self.stack_depth as i32 * SLOT - SLOT) as i32);
-        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;
-        self.buf.emit_i32_le(off)?;
-        // add rax, rcx
-        self.buf.emit_bytes(&[0x48, 0x01, 0xC8])?;
-        // overwrite top slot with result
-        self.stack_depth -= 1;
-        self.push_rax()
+        // stack: [..., a, b]  depth=N
+        // pop b into rax: depth -> N-1
+        self.pop_rax()?;                       // rax = b, depth = N-1
+        // a is now at top: slot index N-2, off = -(16 + (N-2)*8)
+        // but after pop depth = N-1, so a is at depth-1 = N-2
+        let a_off = -((16 + (self.stack_depth as i32 - 1) * SLOT) as i32);
+        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;  // mov rcx, [rbp+a_off]
+        self.buf.emit_i32_le(a_off)?;
+        // add rcx, rax  (a + b -> rcx)
+        self.buf.emit_bytes(&[0x48, 0x01, 0xC1])?;
+        // mov rax, rcx
+        self.buf.emit_bytes(&[0x48, 0x89, 0xC8])?;
+        // overwrite a's slot with result (depth stays at N-1)
+        let res_off = a_off;
+        self.buf.emit_bytes(&[0x48, 0x89, 0x85])?;  // mov [rbp+res_off], rax
+        self.buf.emit_i32_le(res_off)?;
+        // depth already correct: N-1 (consumed b, a replaced with result)
+        Ok(())
     }
 
     /// i32.sub / i64.sub  (a - b, a is deeper)
     pub fn emit_sub(&mut self) -> Result<(), WasmError> {
-        self.pop_rax()?;                       // rax = b
-        let off = -((16 + self.stack_depth as i32 * SLOT - SLOT) as i32);
-        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;
-        self.buf.emit_i32_le(off)?;
-        // sub rcx, rax  (a - b → rcx)
+        // stack: [..., a, b]  depth=N
+        self.pop_rax()?;                       // rax = b, depth = N-1
+        let a_off = -((16 + (self.stack_depth as i32 - 1) * SLOT) as i32);
+        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;  // mov rcx, [rbp+a_off]  (rcx = a)
+        self.buf.emit_i32_le(a_off)?;
+        // sub rcx, rax  (a - b -> rcx)
         self.buf.emit_bytes(&[0x48, 0x29, 0xC1])?;
         // mov rax, rcx
         self.buf.emit_bytes(&[0x48, 0x89, 0xC8])?;
-        self.stack_depth -= 1;
-        self.push_rax()
+        // store result back into a's slot
+        self.buf.emit_bytes(&[0x48, 0x89, 0x85])?;  // mov [rbp+a_off], rax
+        self.buf.emit_i32_le(a_off)?;
+        Ok(())
     }
 
     /// i32.mul / i64.mul
     pub fn emit_mul(&mut self) -> Result<(), WasmError> {
-        self.pop_rax()?;                       // rax = b
-        let off = -((16 + self.stack_depth as i32 * SLOT - SLOT) as i32);
-        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;
-        self.buf.emit_i32_le(off)?;
-        // imul rax, rcx
+        // stack: [..., a, b]  depth=N
+        self.pop_rax()?;                       // rax = b, depth = N-1
+        let a_off = -((16 + (self.stack_depth as i32 - 1) * SLOT) as i32);
+        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;  // mov rcx, [rbp+a_off]  (rcx = a)
+        self.buf.emit_i32_le(a_off)?;
+        // imul rax, rcx  (a * b -> rax)
         self.buf.emit_bytes(&[0x48, 0x0F, 0xAF, 0xC1])?;
-        self.stack_depth -= 1;
-        self.push_rax()
+        // store result back into a's slot
+        self.buf.emit_bytes(&[0x48, 0x89, 0x85])?;  // mov [rbp+a_off], rax
+        self.buf.emit_i32_le(a_off)?;
+        Ok(())
     }
 
     /// i32.and / i64.and
     pub fn emit_and(&mut self) -> Result<(), WasmError> {
-        self.pop_rax()?;
-        let off = -((16 + self.stack_depth as i32 * SLOT - SLOT) as i32);
-        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;
-        self.buf.emit_i32_le(off)?;
-        // and rax, rcx
-        self.buf.emit_bytes(&[0x48, 0x21, 0xC8])?;
-        self.stack_depth -= 1;
-        self.push_rax()
+        self.pop_rax()?;                       // rax = b, depth = N-1
+        let a_off = -((16 + (self.stack_depth as i32 - 1) * SLOT) as i32);
+        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;  // mov rcx, [rbp+a_off]
+        self.buf.emit_i32_le(a_off)?;
+        self.buf.emit_bytes(&[0x48, 0x21, 0xC1])?;  // and rcx, rax
+        self.buf.emit_bytes(&[0x48, 0x89, 0xC8])?;  // mov rax, rcx
+        self.buf.emit_bytes(&[0x48, 0x89, 0x85])?;  // mov [rbp+a_off], rax
+        self.buf.emit_i32_le(a_off)?;
+        Ok(())
     }
 
     /// i32.or / i64.or
     pub fn emit_or(&mut self) -> Result<(), WasmError> {
-        self.pop_rax()?;
-        let off = -((16 + self.stack_depth as i32 * SLOT - SLOT) as i32);
-        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;
-        self.buf.emit_i32_le(off)?;
-        // or rax, rcx
-        self.buf.emit_bytes(&[0x48, 0x09, 0xC8])?;
-        self.stack_depth -= 1;
-        self.push_rax()
+        self.pop_rax()?;                       // rax = b, depth = N-1
+        let a_off = -((16 + (self.stack_depth as i32 - 1) * SLOT) as i32);
+        self.buf.emit_bytes(&[0x48, 0x8B, 0x8D])?;  // mov rcx, [rbp+a_off]
+        self.buf.emit_i32_le(a_off)?;
+        self.buf.emit_bytes(&[0x48, 0x09, 0xC1])?;  // or rcx, rax
+        self.buf.emit_bytes(&[0x48, 0x89, 0xC8])?;  // mov rax, rcx
+        self.buf.emit_bytes(&[0x48, 0x89, 0x85])?;  // mov [rbp+a_off], rax
+        self.buf.emit_i32_le(a_off)?;
+        Ok(())
     }
 
     /// local.get idx — load local[idx] onto value stack
     pub fn emit_local_get(&mut self, idx: u32) -> Result<(), WasmError> {
         if idx as usize >= self.locals_count {
-            return Err(WasmError::Trap(format!("jit: local.get {} out of range", idx)));
+            return Err(WasmError::ValidationFailed(format!("jit: local.get {} out of range", idx)));
         }
         // mov rdi, [rbp-8]   (reload locals ptr)
         self.buf.emit_bytes(&[0x48, 0x8B, 0x7D, 0xF8])?;
@@ -316,7 +331,7 @@ impl<'a> X64Emitter<'a> {
     /// local.set idx — pop value stack into local[idx]
     pub fn emit_local_set(&mut self, idx: u32) -> Result<(), WasmError> {
         if idx as usize >= self.locals_count {
-            return Err(WasmError::Trap(format!("jit: local.set {} out of range", idx)));
+            return Err(WasmError::ValidationFailed(format!("jit: local.set {} out of range", idx)));
         }
         self.pop_rax()?;
         // mov rdi, [rbp-8]
@@ -331,7 +346,7 @@ impl<'a> X64Emitter<'a> {
     /// local.tee idx — peek + set (value stays on stack)
     pub fn emit_local_tee(&mut self, idx: u32) -> Result<(), WasmError> {
         if idx as usize >= self.locals_count {
-            return Err(WasmError::Trap(format!("jit: local.tee {} out of range", idx)));
+            return Err(WasmError::ValidationFailed(format!("jit: local.tee {} out of range", idx)));
         }
         self.peek_rax()?;
         // mov rdi, [rbp-8]
@@ -345,7 +360,7 @@ impl<'a> X64Emitter<'a> {
     /// drop — discard top of value stack
     pub fn emit_drop(&mut self) -> Result<(), WasmError> {
         if self.stack_depth == 0 {
-            return Err(WasmError::Trap("jit: drop on empty stack".into()));
+            return Err(WasmError::StackUnderflow);
         }
         self.stack_depth -= 1;
         Ok(())
@@ -457,9 +472,7 @@ pub fn jit_compile(func: &WasmFunc, locals_count: usize) -> Result<JitFunction, 
                 }
 
                 _ => {
-                    return Err(WasmError::Trap(
-                        format!("jit: unsupported opcode 0x{:02X} at ip={}", op, ip - 1)
-                    ));
+                    return Err(WasmError::InvalidInstruction(op));
                 }
             }
         }

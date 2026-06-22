@@ -117,7 +117,7 @@ fn t11_jit_i32_add() {
 #[test]
 fn t12_jit_i32_sub() {
     // i32.const 100, i32.const 58, i32.sub, end  → 42
-    let func = make_func(vec![0x41, 100, 0x41, 58, 0x6B, 0x0B]);
+    let func = make_func(vec![0x41, 0xE4, 0x00, 0x41, 58, 0x6B, 0x0B]); // 100=2-byte LEB128
     let jf = jit_compile(&func, 0).unwrap();
     let mut locals: Vec<i64> = vec![];
     let result = jf.call(&mut locals);
@@ -150,7 +150,7 @@ fn t14_jit_local_get_set() {
 #[test]
 fn t15_jit_local_set_get() {
     // i32.const 77, local.set 0, local.get 0, end  → 77
-    let func = make_func(vec![0x41, 77, 0x21, 0x00, 0x20, 0x00, 0x0B]);
+    let func = make_func(vec![0x41, 0xCD, 0x00, 0x21, 0x00, 0x20, 0x00, 0x0B]); // 77=2-byte LEB128
     let jf = jit_compile(&func, 1).unwrap();
     let mut locals = vec![0i64];
     let result = jf.call(&mut locals);
@@ -185,7 +185,7 @@ fn t17_jit_nop() {
 fn t18_jit_drop() {
     // i32.const 99, i32.const 42, drop, end  → 99 (99 stays on stack)
     // Wait: drop pops the top (42), leaving 99.
-    let func = make_func(vec![0x41, 99, 0x41, 42, 0x1A, 0x0B]);
+    let func = make_func(vec![0x41, 0xE3, 0x00, 0x41, 42, 0x1A, 0x0B]); // 99=2-byte LEB128
     let jf = jit_compile(&func, 0).unwrap();
     let mut locals: Vec<i64> = vec![];
     let result = jf.call(&mut locals);

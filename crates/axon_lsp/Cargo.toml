@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+[package]
+name = "axon_lsp"
+version = "0.64.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_lsp — AXONYX sovereign Language Server (LSP 3.17)"
+license = "Apache-2.0"
+
+[[bin]]
+name = "axon_lsp"
+path = "src/main.rs"
+
+[dependencies]
+axon_parser = { path = "../../axon_parser" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+serde_json = "1"
