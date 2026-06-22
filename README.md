@@ -2,16 +2,18 @@
   <img src="assets/axon_bannerF.png" alt="AXON Banner">
 </p>
 
-# AXON — First Sovereign Systems Programming Language
+# AXON — Sovereign Systems Programming Language
 
 > *"We are not users. We are not accounts. We are not products. We are people."*
 
-**AAIEONYX AXON is the world's first sovereign systems programming language. It combines compiler-enforced deployment profiles, formal contracts, AI-assisted verification, and CPU/GPU execution for seL4-oriented infrastructure.**
+![CI](https://github.com/aieonyx/AXON/actions/workflows/ci.yml/badge.svg)
+
+**AIEONYX AXON is a sovereign systems programming language.** It combines compiler-enforced deployment profiles, formal contracts, AI-assisted verification, and CPU/GPU execution for seL4-oriented infrastructure.
 
 Built for the [AIEONYX](https://github.com/aieonyx) platform. Rust-like memory safety, zero GC, built-in formal contracts, and sovereign capability profiles enforced at compile time.
 
-**Status: Phases 35–44 complete. Compiler 100%. OS 100%. Phoenix drivers shipped.**  
-**1,072 tests passing. Clippy clean. Live aarch64-seL4 boot confirmed.**
+**Status: Tier 1 + Tier 2 + Tier 3 complete.**
+**1,606+ tests passing. 0 failures. Clippy clean. Live aarch64-seL4 boot confirmed.**
 
 ---
 
@@ -19,14 +21,17 @@ Built for the [AIEONYX](https://github.com/aieonyx) platform. Rust-like memory s
 
 The genuinely new idea is the placement: a local AI verifier as a mandatory compiler phase that can reject programs. It runs fully offline, with no cloud.
 
-Editor-side assistants, like Copilot, suggest but do not gate. Dafny, Verus, and SPARK have machine-checked contracts but lack a natural-language intent layer. AXON combines both features: @ensures is discharged by a sound checker (Kani-verified core), with @ai.intent as a natural-language contract layer. It is the first systems language where local LLM intent verification is a compilation phase targeting seL4.
+Editor-side assistants like Copilot suggest but do not gate. Dafny, Verus, and SPARK have machine-checked contracts but lack a natural-language intent layer. AXON combines both: `@ensures` is discharged by a sound checker (Kani-verified core), with `@ai.intent` as a natural-language contract layer. It is the first systems language where local LLM intent verification is a compilation phase targeting seL4.
 
-  This defensible combination is not available in any other language today:
+This defensible combination is not available in any other language today:
+
 - Memory safety + Python-readable syntax
 - `@ai.intent` / `@ensures` / `@requires` as compiler gates (not editor hints)
 - seL4-native target — designed for it, not retrofitted
 - Zero cloud dependency; sovereignty is structural, not a setting
-- CPU + GPU (PTX) + aarch64-seL4 bare metal from one toolchain
+- CPU + GPU (Vulkan/AMD RADV) + aarch64-seL4 bare metal from one toolchain
+- Transformer attention expressible in pure `.ax` source (P63.1)
+- Sovereign WASM JIT: x86_64 native code generation, no LLVM (P61.1)
 
 ---
 
@@ -43,60 +48,32 @@ fn main() -> i32 {
 
 ```bash
 # Compile for CPU
-axon build --profile sovereign-offline -o add add.axon
+axon build --profile sovereign-offline -o add add.ax
 ./add; echo $?   # 42
 
-# Compile for NVIDIA GPU (T4, A100, RTX)
-axon build --profile sovereign-offline --target nvptx64 -o kernel kernel.axon
+# Compile for Vulkan GPU (AMD RADV)
+axon build --profile sovereign-offline --target vulkan -o kernel kernel.ax
 
 # Compile for aarch64-seL4 bare metal
-axon build --profile seL4-strict --target aarch64-sel4 -o node node.axon
+axon build --profile seL4-strict --target aarch64-sel4 -o node node.ax
 ```
 
 ---
 
 ## Benchmark Results
 
-### Phase 4 — Binary Execution Speed (Official Record)
+### Compiler Throughput (Phase 36 — Official Record)
 
-<p align="center">
-  <img src="assets/phase4_benchmark.png" alt="Phase 4 Benchmark">
-</p>
+Test: full compiler pipeline — 5,000 runs, AMD Ryzen 7, LLVM 18, Pop!_OS
 
-Test: `classify()` — 100M calls, AMD Ryzen 7, LLVM 18.1.3
-
-| Target                          | Throughput   | Notes                     |
-|---------------------------------|--------------|---------------------------|
-| AXON native (switch→cmp chain)  | 167–190 M/s  | Branch-based codegen      |
-| Rust native (setne+cmove)       | 206–224 M/s  | cmov path                 |
-| Rust with inlining              | ~516 M/s     | Inlining not yet in AXON  |
-
-Machine code size: AXON = 26 bytes, Rust = 20 bytes  
-**Verdict:** Equivalent quality. Different strategy.
-
----
-
-### Phase 36 — Compiler Throughput (Official Record)
-
-Test: full compiler pipeline — 5,000 runs, AMD Ryzen 7, LLVM 18, Pop OS
-
-| Workload                            | Latency       | Throughput          |
-|-------------------------------------|---------------|---------------------|
-| IR emission (simple fn)             | 25µs/compile  | ~40,000 compiles/s  |
-| IR emission (arithmetic)            | 38µs/compile  | ~26,315 compiles/s  |
-| IR emission (multi-function)        | 52µs/compile  | ~19,230 compiles/s  |
-| IR emission avg (5,000 runs)        | 33µs/compile  | ~30,303 compiles/s  |
-| Full pipeline (IR + llc-18 + clang) | ~72ms         | native binary out   |
-
-Binary correctness: exit 42 verified across all workloads ✅
-
----
+| Workload | Latency | Throughput |
+|---|---|---|
+| IR emission (simple fn) | 25µs/compile | ~40,000 compiles/s |
+| IR emission (arithmetic) | 38µs/compile | ~26,315 compiles/s |
+| IR emission (multi-function) | 52µs/compile | ~19,230 compiles/s |
+| Full pipeline (IR + llc + link) | ~72ms | native binary out |
 
 ### GPU — NVIDIA T4 (Google Colab)
-
-<p align="center">
-  <img src="assets/junebenchmark.png" alt="GPU Benchmark">
-</p>
 
 - Vector addition: 1,000,000 elements × 20 runs
 - Throughput: **16.64 billion ops/sec**
@@ -111,12 +88,12 @@ Binary correctness: exit 42 verified across all workloads ✅
 Every AXON program compiles under a sovereign capability profile.
 Violations abort compilation — not a runtime check, not a policy file.
 
-| Profile             | Use Case                              | BASTION Safe |
-|---------------------|---------------------------------------|:------------:|
-| `seL4-strict`       | Maximum isolation. Production.        | ✅           |
-| `sovereign-offline` | No network. Local node.               | ✅           |
-| `mesh-node`         | Controlled network. Mesh participant. | ✅           |
-| `dev-mode`          | Development only.                     | ❌           |
+| Profile | Use Case | BASTION Safe |
+|---|---|:---:|
+| `seL4-strict` | Maximum isolation. Production. | ✅ |
+| `sovereign-offline` | No network. Local node. | ✅ |
+| `mesh-node` | Controlled network. Mesh participant. | ✅ |
+| `dev-mode` | Development only. | ❌ |
 
 ---
 
@@ -135,129 +112,133 @@ Unverifiable contracts emit compiler errors — never silently accepted.
 
 ---
 
-## What Makes AXON Different
-
-| Feature                        | Rust | C++ | Go | AXON |
-|--------------------------------|:----:|:---:|:--:|:----:|
-| Memory safety                  | ✅   | ❌  | ⚠️  | ✅   |
-| No GC                          | ✅   | ✅  | ❌  | ✅   |
-| `@requires` / `@ensures`       | ❌   | ❌  | ❌  | ✅   |
-| `@ai.intent` compiler gate     | ❌   | ❌  | ❌  | ✅   |
-| Capability profiles            | ❌   | ❌  | ❌  | ✅   |
-| GPU compilation                | ⚠️   | ⚠️  | ❌  | ✅   |
-| seL4 bare-metal target         | ❌   | ⚠️  | ❌  | ✅   |
-| Built-in AI compute (ONYX)     | ❌   | ❌  | ❌  | ✅   |
-| Sovereign enforcement          | ❌   | ❌  | ❌  | ✅   |
-| Zero cloud dependency          | ❌   | ✅  | ❌  | ✅   |
-| Live seL4 boot confirmed       | ❌   | ❌  | ❌  | ✅   |
-
----
-
-## Compiler Architecture
-
-**1,072 tests. 0 failures. Clippy clean.**
-
-Full pipeline: Lexer → Parser → HIR → HM Type Inference → LLVM 18 → Native binary / PTX / aarch64-seL4 ELF
-
-Kani-verified core (`axon_verify_core`): 17 harnesses, 0 failures — constitutional verification kernel.
-
-Live boot confirmed: AXON compiles, boots on QEMU aarch64-seL4, `axon_main()` returns 42.
-
----
-
 ## Current Capabilities
 
-| Domain             | Component                                               | Status   |
-|--------------------|---------------------------------------------------------|----------|
-| **Compiler**       | Lexer → Parser → HIR → LLVM 18 → native binary         | ✅ 100%  |
-| **Compiler**       | Result<T,E> error payload + ? propagation               | ✅       |
-| **Compiler**       | aarch64-seL4 asm! intrinsics (all syscalls)             | ✅       |
-| **OS**             | Sovereign heap allocator (slab + buddy)                 | ✅ 100%  |
-| **OS**             | IRQ dispatch layer — seL4 IRQ caps                      | ✅       |
-| **OS**             | Driver PAL — UART, GPIO, Timer                          | ✅       |
-| **OS**             | AXFS — sovereign file system (DataTier enforcement)     | ✅       |
-| **OS**             | GENESIS root task — CapabilityBroker CB-01–CB-10        | ✅       |
-| **OS**             | Live aarch64-seL4 boot on QEMU                          | ✅       |
-| **AI Compute**     | axon_math — FFT, linalg, stats                          | ✅       |
-| **AI Compute**     | axon_tensor — Tensor<T,D> + SIMD                        | ✅       |
-| **AI Compute**     | axon_learn — Autodiff, SGD/Adam, ReLU/Softmax           | ✅       |
-| **AI Compute**     | axon_compute — GPU dispatch, AWP mesh, checkpoint       | ✅ 80%   |
-| **Drivers**        | USB HID — keyboard, mouse, gamepad                      | ✅       |
-| **Drivers**        | USB CDC-ECM — network adapter                           | ✅       |
-| **Drivers**        | Intel HDA — audio output                                | ✅       |
-| **Drivers**        | VESA/GOP — display framebuffer                          | ✅       |
-| **Drivers**        | USB Mass Storage — block device                         | ✅       |
-| **Drivers**        | Sovereign PD isolation per driver                       | ✅       |
-| **Drivers**        | AWP device discovery across mesh                        | ✅       |
-| **Drivers**        | Vendor driver plug-in interface                         | ✅       |
-| **Full Sovereign** | End-to-end sovereignty                                  | 🔄 65%  |
+| Domain | Component | Tests | Status |
+|---|---|---|---|
+| **Compiler** | Lexer → Parser → HIR → LLVM 18 → native binary | 342 | ✅ |
+| **Compiler** | Hindley-Milner type inference | — | ✅ |
+| **Compiler** | Self-hosting bootstrap (P45–P55) | 109 | ✅ v0.55-bootstrap |
+| **Compiler** | @constant_time codegen (P55.7) | 34 | ✅ |
+| **Compiler** | aarch64-seL4 asm! intrinsics | — | ✅ |
+| **Crypto** | axon_crypto — Ed25519, X25519, ChaCha20, SHA-256 | 93 | ✅ P57.1 |
+| **GPU** | axon_gpu — Vulkan/AMD RADV backend | 30 | ✅ P58.1 |
+| **AI Runtime** | axon_ai_runtime — matmul, softmax, relu | 22 | ✅ |
+| **AI Runtime** | Transformer attention in pure .ax (P63.1) | 20 | ✅ |
+| **WASM** | axon_wasm — binary parser, validator, interpreter | 17 | ✅ |
+| **WASM** | Sovereign WASM JIT — x86_64 native codegen (P61.1) | 20 | ✅ |
+| **LSP** | axon_lsp — LSP 3.17 language server (P64) | 20 | ✅ |
+| **Registry** | axon_registry — sovereign package registry (P65) | 20 | ✅ |
+| **Protocol** | axon_awp — AWP protocol core (P66) | 20 | ✅ |
+| **seL4** | axon_sel4 — aarch64-seL4 sovereign echo | — | ✅ merged |
+| **OS** | GENESIS root task, CapabilityBroker CB-01–CB-10 | — | ✅ |
+| **OS** | Live aarch64-seL4 boot on QEMU, axon_main()=42 | — | ✅ |
+| **Drivers** | USB HID, CDC-ECM, HDA, VESA/GOP, Mass Storage | — | ✅ |
+| **Std** | axon_std — sync, mem, net, font, media | 116 | ✅ |
+| **Workspace** | **Total** | **1,606+** | **0 failures** |
 
 ---
 
-## Possible Contributions to the World
+## What Makes AXON Different
 
-- **A new compiler category** — verification-gated compilation with natural-language contracts. Citable, nameable, first-mover.
-- **A sovereign high-assurance toolchain for seL4** — no language was *designed* for seL4 until AXON. Real value for embedded, defense, medical, and election-integrity work.
-- **A teaching bridge into formal methods** — `@ensures` in readable syntax lowers the barrier dramatically versus Dafny or SPARK.
-- **Research artifacts** — arXiv paper, CS term registry (46 formally named terms), Kani-verified core, reproducible build manifests.
-- **ONYX sovereign AI compute** — inference on BASTION nodes without cloud dependency. Local tensor engine, autodiff, GPU dispatch.
+| Feature | Rust | C++ | Go | AXON |
+|---|:---:|:---:|:---:|:---:|
+| Memory safety | ✅ | ❌ | ⚠️ | ✅ |
+| No GC | ✅ | ✅ | ❌ | ✅ |
+| `@requires` / `@ensures` | ❌ | ❌ | ❌ | ✅ |
+| `@ai.intent` compiler gate | ❌ | ❌ | ❌ | ✅ |
+| Capability profiles | ❌ | ❌ | ❌ | ✅ |
+| GPU compilation (Vulkan) | ⚠️ | ⚠️ | ❌ | ✅ |
+| seL4 bare-metal target | ❌ | ⚠️ | ❌ | ✅ |
+| Sovereign WASM JIT | ❌ | ❌ | ❌ | ✅ |
+| Built-in AWP protocol | ❌ | ❌ | ❌ | ✅ |
+| Language server (LSP 3.17) | — | — | — | ✅ |
+| Sovereign package registry | — | — | — | ✅ |
+| Zero cloud dependency | ❌ | ✅ | ❌ | ✅ |
+| Live seL4 boot confirmed | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
 ## Phase History
 
-| Phase | What                                                                         | Status |
-|-------|------------------------------------------------------------------------------|--------|
-| 1     | Language design & S4+i spec                                                  | ✅     |
-| 2     | Lexer + Parser                                                               | ✅     |
-| 3     | Rust transpiler                                                              | ✅     |
-| 4     | LLVM native backend                                                          | ✅     |
-| 5     | AI inference engine                                                          | ✅     |
-| 6     | Stage 3 compiler features (263 tests)                                        | ✅     |
-| 7     | Compiler architecture spec (CCP, ASP, ownership)                             | ✅     |
-| 8–22  | Full compiler pipeline — real programs compile and run                       | ✅     |
-| 23–30 | OS Development Track — seL4 syscalls, asm!, IRQ, no_std runtime             | ✅     |
-| 31    | axon_math — ONYX core math stdlib (FFT, linalg, stats)                      | ✅     |
-| 32    | axon_tensor — Tensor engine + SIMD                                           | ✅     |
-| 33    | axon_learn — Autodiff, neural layers, SGD/Adam                               | ✅     |
-| 34    | axon_compute — GPU dispatch, AWP mesh, ONYX checkpoint                       | ✅     |
-| 35    | Result<T,E> error payload — E type stored, ? operator fixed                  | ✅     |
-| 36    | aarch64-seL4 asm! intrinsics — all syscalls                                  | ✅     |
-| 37    | axon_alloc — sovereign heap allocator (slab + buddy)                         | ✅     |
-| 38    | IRQ dispatch layer — seL4 IRQ caps, handler registration                     | ✅     |
-| 39    | Driver PAL — UART, GPIO, Timer                                               | ✅     |
-| 40    | AXFS — sovereign file system layer                                           | ✅     |
-| 41    | GENESIS root task — BootInfo, CapabilityBroker CB-01–CB-10                   | ✅     |
-| 42    | **Live aarch64-seL4 boot — AXON boots on QEMU, axon_main() = 42**           | ✅     |
-| 43    | Phoenix generic drivers — USB HID, CDC-ECM, HDA, VESA/GOP, Mass Storage     | ✅     |
-| 44    | axon_drivers::sovereign — PD isolation, device registry, AWP discovery       | ✅     |
+| Phase | What | Status |
+|---|---|---|
+| 1–7 | Language design, lexer, parser, transpiler, LLVM backend, AI inference | ✅ |
+| 8–22 | Full compiler pipeline — real programs compile and run | ✅ |
+| 23–30 | OS track — seL4 syscalls, asm!, IRQ, no_std runtime | ✅ |
+| 31–34 | ONYX AI compute — axon_math, axon_tensor, axon_learn, axon_compute | ✅ |
+| 35–44 | OS hardening — heap, IRQ, drivers, AXFS, GENESIS, live seL4 boot | ✅ |
+| 45–55 | **Self-hosting bootstrap** — AXON compiles AXON, 109 tests, GPG-signed | ✅ v0.55-bootstrap |
+| 56–63 | **HANIEL unlock** — axon_net, axon_crypto, axon_gpu, axon_media, axon_wasm, axon_font, axon_ai_runtime, axon_layout | ✅ 1,446 tests |
+| P57.1 | Ed25519 full curve math (93 tests, Kani-verified) | ✅ |
+| P55.7 | @constant_time codegen (34 tests) | ✅ |
+| P58.1 | Vulkan/AMD RADV GPU backend (30 tests) | ✅ |
+| axon_sel4 | seL4 rewrite — aarch64 sovereign_echo.ax, seL4 ABI PASSED | ✅ merged |
+| **P63.1** | Transformer attention in pure .ax source | ✅ 20 tests |
+| **P61.1** | ECHO sovereign WASM JIT — x86_64 native codegen, no LLVM | ✅ 20 tests |
+| **P64** | axon_lsp — AXONYX Language Server (LSP 3.17) | ✅ 20 tests |
+| **P65** | axon_registry — sovereign package registry (SHA-256, Ed25519) | ✅ 20 tests |
+| **P66** | axon_awp — AWP protocol core (11 categories, 249 regions, C-ABI FFI) | ✅ 20 tests |
+
+---
+
+## CS Contributions Registry
+
+55 formally named terms across AXON, EdisonDB, and Onyxia. Selected highlights:
+
+- **Sovereign AWP Protocol** — two-tier naming grammar, fixed category registry, ISO 3166-1 regional routing
+- **Capability-Flow Compiler** — static analysis rejects capability violations before code generation
+- **ARPi Provenance Header** — 78-byte fixed wire format for data origin verification without transport trust
+- **Sovereign Hash Projection Embedding** — deterministic offline embeddings, zero network, zero model files
+- **BASTION Binary Verification Gate** — 7-step gate, dev-mode unconditionally rejected
+- **@constant_time Codegen** — compiler-enforced constant-time code paths for crypto operations
+
+Full registry: [EXHIBIT.md](https://github.com/aieonyx/onyxia/blob/main/EXHIBIT.md)
+arXiv submission: cs.AR — slot 7680982
 
 ---
 
 ## Building
 
 ```bash
-git clone https://github.com/aieonyx/axon
-cd axon
-cargo install --path axon_cli
-axon version
+git clone https://github.com/aieonyx/AXON
+cd AXON
+cargo test --workspace -- --test-threads=1
 ```
+
+Individual crate tests:
+```bash
+cargo test -p axon_crypto -- --test-threads=1
+cargo test -p axon_awp --test p66_awp_tests -- --test-threads=1
+cargo test -p axon_lsp --test p64_lsp_tests -- --test-threads=1
+```
+
+---
+
+## Part of the AIEONYX sovereign stack
+
+| Component | Role | Status |
+|---|---|---|
+| **AXON** (this repo) | Sovereign compiler, protocol, registry, LSP | ✅ 1,606+ tests |
+| **[EdisonDB](https://github.com/aieonyx/edisondb)** | Sovereign database — Phase 3 complete | ✅ v0.6.0-stable |
+| **[Onyxia](https://github.com/aieonyx/onyxia)** | Sovereign browser | ✅ v1.0.0 |
+| **[BASTION](https://github.com/aieonyx/bastion)** | Sovereign node OS bootstrap | ✅ v0.2.0 |
 
 ---
 
 ## License
 
-Apache 2.0 — permanently and irrevocably.  
+Apache 2.0 — permanently and irrevocably.
 Community Promise II: the core will never become proprietary.
 
 ## Author
 
-Edison Lepiten — Solo founder, AIEONYX  
-Prague, Czech Republic.  
+Edison Lepiten — Solo founder, AIEONYX
+Prague, Czech Republic.
 For ordinary people. Not corporations.
 
 ---
 
-*AIEONYX: github.com/aieonyx*  
-*NLNet NGI Zero grant application submitted May 2026*  
-*CS Contributions Registry: 46 formally named terms — arXiv submission in preparation*
+*AIEONYX: github.com/aieonyx*
+*NLNet NGI Zero grant application submitted May 2026*
+*CS Contributions Registry: 55 formally named terms — arXiv submission in preparation*
