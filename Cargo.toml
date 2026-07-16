@@ -4,6 +4,7 @@ members = [
     "axon_awp_ffi",
     "crates/axon_awp",
     "crates/axon_data",
+    "crates/axon_train",
     "axon_core",
     "axon_fs",
     "axon_genesis",

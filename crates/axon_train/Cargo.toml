@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+[package]
+name = "axon_train"
+version = "0.68.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_train — IAM sovereign training loop orchestrator"
+license = "Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+axon_data = { path = "../axon_data" }
+
+[dev-dependencies]
+serde_json = "1"
