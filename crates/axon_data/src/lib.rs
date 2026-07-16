@@ -5,3 +5,4 @@
 pub mod types;
 pub mod ingest;
 pub mod clean;
+pub mod tokenizer;
