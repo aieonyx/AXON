@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+[package]
+name = "axon_interp"
+version = "0.1.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "axon_interp — sovereign .ax script interpreter (no_std bare-metal subset)"
+license = "Apache-2.0"
+
+# no_std compatible — runs on aiXos bare-metal and Linux host
+[features]
+default = ["std"]
+std = []       # enables host-side REPL and file loading
+no_std = []    # bare-metal mode (aiXos Phoenix, seL4)
+
+[dependencies]
+
+[dev-dependencies]
