@@ -132,6 +132,7 @@ fn parse_fn_with_decorators(s: &mut TokenStream, decorators: Vec<Decorator>) -> 
     })
 }
 
+#[allow(dead_code)]
 fn parse_fn(s: &mut TokenStream) -> ParseResult<Item> {
     parse_fn_with_decorators(s, vec![])
 }
