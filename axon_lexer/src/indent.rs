@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_match)]
 // ============================================================
 // AXON Lexer — indent.rs
 // Indent Tracker — P2-04
