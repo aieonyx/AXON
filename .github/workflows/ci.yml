@@ -1,30 +1,47 @@
-name: AXON CI
+name: HANIEL CI
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install LLVM
-        run: sudo apt-get install -y llvm lld
-      - name: Run axon_parser tests
-        run: cargo test -p axon_parser -- --test-threads=1
-      - name: Run axon_crypto tests
-        run: cargo test -p axon_crypto -- --test-threads=1
-      - name: Run axon_ai_runtime tests
-        run: cargo test -p axon_ai_runtime --test p63_1_attention_tests -- --test-threads=1
-      - name: Run axon_wasm tests
-        run: cargo test -p axon_wasm --test p61_1_jit_tests -- --test-threads=1
-      - name: Run axon_lsp tests
-        run: cargo test -p axon_lsp --test p64_lsp_tests -- --test-threads=1
-      - name: Run axon_registry tests
-        run: cargo test -p axon_registry --test p65_registry_tests -- --test-threads=1
-      - name: Run axon_awp tests
-        run: cargo test -p axon_awp --test p66_awp_tests -- --test-threads=1
+        with:
+          submodules: recursive
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libvulkan-dev \
+            vulkan-validationlayers \
+            mesa-vulkan-drivers \
+            llvm \
+            clang \
+            lld
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build workspace
+        run: cargo build --workspace 2>&1
+
+      - name: Run tests
+        run: cargo test --workspace -- --test-threads=1 2>&1
+
       - name: Clippy
-        run: cargo clippy --workspace -- -W warnings
+        run: cargo clippy --workspace -- -D warnings 2>&1

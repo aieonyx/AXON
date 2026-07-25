@@ -13,3 +13,7 @@ serde_json = "1"
 
 [dev-dependencies]
 serde_json = "1"
+
+[[bin]]
+name = "train_tokenizer"
+path = "src/bin/train_tokenizer.rs"

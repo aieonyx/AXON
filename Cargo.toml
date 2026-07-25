@@ -56,7 +56,7 @@ members = [
 # REMOVED(p13-m1):     "axon_llvm",
 # REMOVED(p13-m1):     "axon_ai",
     "axon_cli",
-    "axon_sel4",
+    "axon_sel4", "crates/iam",
 ]
 
 # Workspace-wide dependency versions
