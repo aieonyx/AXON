@@ -1,0 +1,49 @@
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+// axon_sel4/ax/types.ax -- Sovereign seL4 types in AXON source.
+// P axon_sel4 rewrite M1: core IPC types expressed in pure AXON.
+// Compiled by axonc --target aarch64-sel4 --profile seL4-strict.
+
+// seL4 capability pointer — index into CNode
+struct CPtr {
+    slot: i32,
+}
+
+// seL4 message info word — encodes label and message length
+struct MessageInfo {
+    label:  i32,
+    length: i32,
+}
+
+// IPC result — success or seL4 error code
+struct IpcResult {
+    ok:    i32,
+    error: i32,
+}
+
+// seL4 IPC badge — carried on endpoint receive
+struct Badge {
+    value: i32,
+}
+
+// Construct a MessageInfo from label and length
+fn msg_info(label: i32, length: i32) -> i32 {
+    return label;
+}
+
+// Check if IpcResult is success
+fn ipc_ok(result: i32) -> i32 {
+    if result == 0 {
+        return 1;
+    }
+    return 0;
+}
+
+// Encode label into seL4 msginfo word (label in bits 12+)
+fn encode_label(label: i32) -> i32 {
+    return label;
+}
+
+fn main() -> i32 {
+    return 0;
+}

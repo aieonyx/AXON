@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Edison Lepiten / AIEONYX
+[package]
+name = "iam"
+version = "0.1.0"
+edition = "2021"
+authors = ["Edison Lepiten <aieonyx.eu@gmail.com>"]
+description = "IAM — Intelligent Assistant to Man — IAMSeed 120M pretraining"
+license = "Apache-2.0"
+
+[[bin]]
+name = "train_iam"
+path = "src/bin/train_iam.rs"
+
+[dependencies]
+axon_data  = { path = "../axon_data"  }
+axon_train = { path = "../axon_train" }
+axon_learn = { path = "../../axon_learn" }
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"

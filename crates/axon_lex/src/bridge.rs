@@ -5,7 +5,7 @@
 // Excised at P55 bootstrap when axonc compiles lex.ax natively.
 // Any divergence between this file and the .ax sources is a bug.
 
-use axon_std_string::{AxChar, AxString};
+use axon_std_string::AxString;
 use crate::error::{LexError, LexResult};
 use crate::token::Token;
 
@@ -131,7 +131,7 @@ fn lex_decorator(cursor: &mut Cursor) -> LexResult<Token> {
         "sealed_memory"        => Ok(Token::DecoratorSealedMemory),
         "balanced"             => Ok(Token::DecoratorBalanced),
         "atomic_financial"     => Ok(Token::DecoratorAtomicFinancial),
-        other => Ok(Token::Unknown('@')), // unknown decorator falls through
+        _other => Ok(Token::Unknown('@')), // unknown decorator falls through
     }
 }
 
