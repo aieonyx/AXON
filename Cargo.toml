@@ -6,6 +6,7 @@ members = [
     "crates/axon_data",
     "crates/axon_interp",
     "crates/axon_pkg",
+    "crates/axon_aarch64",
     "crates/axon_train",
     "axon_core",
     "axon_fs",
