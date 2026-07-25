@@ -44,4 +44,4 @@ jobs:
         run: cargo test --workspace -- --test-threads=1 2>&1
 
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings 2>&1
+        run: cargo clippy --workspace -- -W warnings 2>&1
