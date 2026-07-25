@@ -12,8 +12,8 @@
 
 Built for the [AIEONYX](https://github.com/aieonyx) platform. Rust-like memory safety, zero GC, built-in formal contracts, and sovereign capability profiles enforced at compile time.
 
-**Status: Tier 1 + Tier 2 + Tier 3 complete.**
-**1,606+ tests passing. 0 failures. Clippy clean. Live aarch64-seL4 boot confirmed.**
+**Status: Tier 1 + Tier 2 + Tier 3 + P67–P72 complete.**
+**1,686+ tests passing. 0 failures. Clippy clean. Live aarch64-seL4 boot confirmed.**
 
 ---
 
@@ -32,6 +32,9 @@ This defensible combination is not available in any other language today:
 - CPU + GPU (Vulkan/AMD RADV) + aarch64-seL4 bare metal from one toolchain
 - Transformer attention expressible in pure `.ax` source (P63.1)
 - Sovereign WASM JIT: x86_64 native code generation, no LLVM (P61.1)
+- AArch64 freestanding native codegen — aiXos Phoenix can be written in AXONYX (P71)
+- Sovereign .axpkg signed app distribution — Ed25519 + BLAKE3, deny-by-default capabilities (P72)
+- IAM data pipeline — BPE tokenizer, corpus ingestion, .axd shards, training loop (P67–P68)
 
 ---
 
@@ -135,7 +138,12 @@ Unverifiable contracts emit compiler errors — never silently accepted.
 | **OS** | Live aarch64-seL4 boot on QEMU, axon_main()=42 | — | ✅ |
 | **Drivers** | USB HID, CDC-ECM, HDA, VESA/GOP, Mass Storage | — | ✅ |
 | **Std** | axon_std — sync, mem, net, font, media | 116 | ✅ |
-| **Workspace** | **Total** | **1,606+** | **0 failures** |
+| **Data** | axon_data — corpus ingestion, BPE tokenizer, .axd shards (P67) | 100 | ✅ |
+| **Training** | axon_train — IAM training loop, checkpoint, .iam export (P68) | 20 | ✅ |
+| **Interpreter** | axon_interp — sovereign .ax interpreter, REPL, no_std (P71.5) | 20 | ✅ |
+| **Packages** | axon_pkg — .axpkg signed package format, Ed25519+BLAKE3 (P72) | 20 | ✅ |
+| **AArch64** | axon_aarch64 — freestanding native codegen, linker script (P71) | 20 | ✅ |
+| **Workspace** | **Total** | **1,686+** | **0 failures** |
 
 ---
 
@@ -156,6 +164,9 @@ Unverifiable contracts emit compiler errors — never silently accepted.
 | Sovereign package registry | — | — | — | ✅ |
 | Zero cloud dependency | ❌ | ✅ | ❌ | ✅ |
 | Live seL4 boot confirmed | ❌ | ❌ | ❌ | ✅ |
+| AArch64 freestanding codegen | ❌ | ⚠️ | ❌ | ✅ |
+| Signed app packages (.axpkg) | ❌ | ❌ | ❌ | ✅ |
+| Sovereign interpreter (no_std) | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
@@ -179,6 +190,12 @@ Unverifiable contracts emit compiler errors — never silently accepted.
 | **P64** | axon_lsp — AXONYX Language Server (LSP 3.17) | ✅ 20 tests |
 | **P65** | axon_registry — sovereign package registry (SHA-256, Ed25519) | ✅ 20 tests |
 | **P66** | axon_awp — AWP protocol core (11 categories, 249 regions, C-ABI FFI) | ✅ 20 tests |
+| **P67** | axon_data — IAM corpus pipeline: ingestion, BPE tokenizer, .axd shards | ✅ 100 tests |
+| **P68** | axon_train — IAM training loop, checkpoint, eval, .iam export | ✅ 20 tests |
+| **P69** | iamrt spec — approved, implementation pending hardware upgrade | 📋 spec locked |
+| **P71.5** | axon_interp — sovereign .ax interpreter upstreamed, REPL mode, no_std | ✅ 20 tests |
+| **P72** | axon_pkg — .axpkg signed package format (Ed25519 + BLAKE3, capabilities) | ✅ 20 tests |
+| **P71** | axon_aarch64 — AArch64 freestanding codegen, linker script, conformance oracle | ✅ 20 tests |
 
 ---
 
@@ -211,6 +228,9 @@ Individual crate tests:
 cargo test -p axon_crypto -- --test-threads=1
 cargo test -p axon_awp --test p66_awp_tests -- --test-threads=1
 cargo test -p axon_lsp --test p64_lsp_tests -- --test-threads=1
+cargo test -p axon_interp --test p71_5_interp_tests -- --test-threads=1
+cargo test -p axon_pkg --test p72_pkg_tests -- --test-threads=1
+cargo test -p axon_aarch64 --test p71_aarch64_tests -- --test-threads=1
 ```
 
 ---
@@ -223,6 +243,7 @@ cargo test -p axon_lsp --test p64_lsp_tests -- --test-threads=1
 | **[EdisonDB](https://github.com/aieonyx/edisondb)** | Sovereign database — Phase 3 complete | ✅ v0.6.0-stable |
 | **[Onyxia](https://github.com/aieonyx/onyxia)** | Sovereign browser | ✅ v1.0.0 |
 | **[BASTION](https://github.com/aieonyx/bastion)** | Sovereign node OS bootstrap | ✅ v0.2.0 |
+| **aiXos Phoenix** | Sovereign desktop OS (bare-metal AArch64, no Linux) | 🔵 PL-60+ |
 
 ---
 
@@ -242,3 +263,4 @@ For ordinary people. Not corporations.
 *AIEONYX: github.com/aieonyx*
 *NLNet NGI Zero grant application submitted May 2026*
 *CS Contributions Registry: 55 formally named terms — arXiv submission in preparation*
+*P67–P72 complete: IAM pipeline, .ax interpreter, .axpkg packages, AArch64 freestanding codegen*
