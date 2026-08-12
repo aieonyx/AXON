@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Edison Lepiten / AIEONYX
+// SPDX-License-Identifier: Apache-2.0
+//
+// AIEONYX Attestation Fixture — FROZEN
+//
+// This file is compiled by CI on every push to prove that the AXONYX
+// compiler emits AArch64 relocatable objects suitable for linkage as an
+// seL4 Protection Domain.
+//
+// DO NOT EDIT. Editing this file invalidates every previously published
+// attestation hash. If a new fixture is ever required, add a second file
+// alongside this one; never modify this one.
+//
+// Result: 16000 + 723 = 16723 = 0x4153 (AIEONYX sovereign proof invariant)
+//
+// Arithmetic is used rather than a bare literal so that code generation
+// must produce real instructions, not a constant fold to a single return.
+
+fn axon_main() -> i32 {
+    let a: i32 = 16000;
+    let b: i32 = 723;
+    return a + b;
+}
