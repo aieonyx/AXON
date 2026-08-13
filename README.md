@@ -2,13 +2,13 @@
   <img src="assets/axon_bannerF.png" alt="AXON Banner">
 </p>
 
-# AXONYX — Sovereign Systems Programming Language
+# AXON/AXONYX — Sovereign Systems Programming Language
 
 > *"We are not users. We are not accounts. We are not products. We are people."*
 
 ![CI](https://github.com/aieonyx/AXON/actions/workflows/ci.yml/badge.svg)
 
-**AXONYX is a sovereign systems programming language by AIEONYX.** It combines compiler-enforced deployment profiles, formal contracts, AI-assisted verification, and CPU/GPU/bare-metal execution for seL4-oriented infrastructure.
+**AXON/AXONYX is a sovereign systems programming language by AIEONYX.** It combines compiler-enforced deployment profiles, formal contracts, AI-assisted verification, and CPU/GPU/bare-metal execution for seL4-oriented infrastructure.
 
 Built for the [AIEONYX](https://github.com/aieonyx) platform. Rust-like memory safety, zero GC, built-in formal contracts, and sovereign capability profiles enforced at compile time.
 
@@ -17,7 +17,7 @@ Built for the [AIEONYX](https://github.com/aieonyx) platform. Rust-like memory s
 
 ---
 
-## What AXONYX Achieves
+## What AXON/AXONYX Achieves
 
 ### In the Language
 
