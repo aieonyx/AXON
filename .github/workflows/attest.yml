@@ -1,11 +1,17 @@
 # Copyright (c) 2026 Edison Lepiten / AIEONYX
 # SPDX-License-Identifier: Apache-2.0
 #
-# EV-3 — AArch64 Attestation
+# AArch64 Attestation
 #
-# Public, reproducible proof that the AXONYX compiler emits AArch64
-# relocatable objects linkable as seL4 Protection Domains. Every run
-# publishes the object and its SHA-256 as downloadable artefacts.
+# Public, reproducible proof that the AXONYX compiler emits AArch64 objects
+# that are linkable as seL4 Protection Domains and that execute correctly.
+#
+# Two stages:
+#   1. attest-build.sh  — compile .ax, verify object shape and ABI gate
+#   2. attest-exec.sh   — link a copy, run under qemu-aarch64, assert 0x4153
+#
+# Every run publishes the object, its SHA-256, the build log, and the
+# execution result as downloadable artefacts.
 #
 # This workflow exists to be read by people outside the project. Keep the
 # output legible.
@@ -19,12 +25,12 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    # Weekly, so the badge stays live even in quiet periods.
+    # Weekly, so the badge stays live during quiet periods.
     - cron: '0 6 * * 1'
 
 jobs:
   aarch64-attestation:
-    name: Compile .ax to AArch64 seL4 object
+    name: Compile .ax to AArch64 seL4 object and execute it
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -37,12 +43,18 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y binutils-aarch64-linux-gnu clang llvm file
+          sudo apt-get install -y \
+            binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu \
+            qemu-user \
+            clang llvm file
           aarch64-linux-gnu-objcopy --version | head -1
+          aarch64-linux-gnu-gcc --version | head -1
+          qemu-aarch64 --version | head -1
           llc --version | head -3
           clang --version | head -1
-        # Code generation shells out to llc and clang; both must be present
-        # before the compiler can emit an object.
+        # Code generation shells out to llc and clang. The execution proof
+        # additionally needs an aarch64 cross-compiler and user-mode QEMU.
 
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -56,8 +68,11 @@ jobs:
             target
           key: attest-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Run attestation
+      - name: Stage 1 — attestation
         run: bash scripts/attest-build.sh
+
+      - name: Stage 2 — execution proof
+        run: bash scripts/attest-exec.sh
 
       - name: Publish attestation artefacts
         if: always()
@@ -78,9 +93,11 @@ jobs:
           {
             echo "## AArch64 Attestation"
             echo ""
-            echo "The AXONYX compiler was built from source in this run and used"
-            echo "to compile \`attest/sovereign_attest.ax\` to an AArch64"
-            echo "relocatable object under the \`seL4-strict\` profile."
+            echo "The AXONYX compiler was built from source in this run and used to"
+            echo "compile \`attest/sovereign_attest.ax\` to an AArch64 relocatable"
+            echo "object under the \`seL4-strict\` profile. A copy of that object was"
+            echo "then linked into a minimal C harness and executed under user-mode"
+            echo "QEMU to confirm it returns the sovereign proof invariant."
             echo ""
             echo '```'
             cat attest/out/MANIFEST.txt 2>/dev/null || echo "no manifest produced"
